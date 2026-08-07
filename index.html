@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Mon Suivi Sport</title>
+<meta name="theme-color" content="#FC4C02">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Suivi Sport">
+<link rel="stylesheet" href="style.css">
+<script src="chart.min.js"></script>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- HEADER -->
+  <header class="topbar">
+    <div class="topbar-title" id="topbarTitle">Mon Suivi Sport</div>
+    <button class="icon-btn" id="addActivityBtn" aria-label="Ajouter une activité">+</button>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main id="main"></main>
+
+  <!-- BOTTOM NAV -->
+  <nav class="bottomnav">
+    <button class="navbtn active" data-page="accueil">
+      <span class="navicon">🏠</span><span>Accueil</span>
+    </button>
+    <button class="navbtn" data-page="stats">
+      <span class="navicon">📊</span><span>Stats</span>
+    </button>
+    <button class="navbtn" data-page="objectifs">
+      <span class="navicon">🎯</span><span>Objectifs</span>
+    </button>
+    <button class="navbtn" data-page="courses">
+      <span class="navicon">🏁</span><span>Courses</span>
+    </button>
+    <button class="navbtn" data-page="bilans">
+      <span class="navicon">📅</span><span>Bilans</span>
+    </button>
+    <button class="navbtn" data-page="profil">
+      <span class="navicon">⚙️</span><span>Profil</span>
+    </button>
+  </nav>
+</div>
+
+<!-- MODAL ROOT -->
+<div id="modalRoot"></div>
+
+<script src="db.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
