@@ -803,12 +803,112 @@ function courseRowWishlist(c) {
   </div>`;
 }
 
+/* ================= BADGES ================= */
+function computeLongestStreak() {
+  if (!DATA.activities.length) return 0;
+  const dates = DATA.activities.map(a => a.date).sort();
+  let cursor = mondayOf(parseISO(dates[0]));
+  const lastMonday = mondayOf(new Date());
+  let best = 0, cur = 0;
+  while (cursor <= lastMonday) {
+    const wEnd = addDays(cursor, 6);
+    const has = activitiesInRange(null, cursor, wEnd).length > 0;
+    if (has) { cur++; best = Math.max(best, cur); } else { cur = 0; }
+    cursor = addWeeks(cursor, 1);
+  }
+  return best;
+}
+function buildBadgeGroups() {
+  const KM_TIERS = [10, 50, 100, 250, 500, 1000, 2500, 5000];
+  const SWIM_TIERS = [1, 5, 10, 25, 50, 100];
+  const SESSION_TIERS = [5, 10, 25, 50, 100, 250, 500];
+  const groups = [];
+  getAllSports().forEach(s => {
+    if (s.distance) {
+      const current = aggForSport(getActivities({ sport: s.id })).distance;
+      const tiers = s.distanceUnit === "m" ? SWIM_TIERS : KM_TIERS;
+      groups.push({
+        id: "dist-" + s.id, icon: s.icon, title: `Distance – ${s.name}`,
+        current, tiers, fmtCurrent: v => fmtKm(v), fmtTarget: v => `${v} km`
+      });
+    } else {
+      const current = activityCountForSport(s.id);
+      groups.push({
+        id: "sess-" + s.id, icon: s.icon, title: `Séances – ${s.name}`,
+        current, tiers: SESSION_TIERS, fmtCurrent: v => `${v} séance${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}`
+      });
+    }
+  });
+  const totalSessions = DATA.activities.length;
+  groups.push({ id: "total-sessions", icon: "🎯", title: "Total séances (tous sports)", current: totalSessions, tiers: [10, 25, 50, 100, 250, 500, 1000], fmtCurrent: v => `${v} séance${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
+  const totalElevation = totalsAll(DATA.activities).elevation;
+  groups.push({ id: "elevation", icon: "⛰️", title: "Dénivelé cumulé", current: totalElevation, tiers: [1000, 5000, 10000, 25000, 50000], fmtCurrent: v => fmtElevation(v), fmtTarget: v => fmtElevation(v) });
+
+  const streak = computeLongestStreak();
+  groups.push({ id: "streak", icon: "🔥", title: "Régularité (semaines d'affilée)", current: streak, tiers: [4, 8, 12, 26, 52], fmtCurrent: v => `${v} semaine${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
+  const coursesDone = getCourses({ status: "done" }).length;
+  groups.push({ id: "courses", icon: "🏁", title: "Courses terminées", current: coursesDone, tiers: [1, 5, 10, 25, 50], fmtCurrent: v => `${v} course${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
+  const sportsTried = getAllSports().filter(s => activityCountForSport(s.id) > 0).length;
+  groups.push({ id: "explorer", icon: "🧭", title: "Sports essayés", current: sportsTried, tiers: [3, 5, 7], fmtCurrent: v => `${v} sport${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
+  const challengesDone = DATA.challenges.filter(ch => ch.items.length > 0 && ch.items.every(i => i.done)).length;
+  groups.push({ id: "challenges", icon: "🏆", title: "Challenges complétés", current: challengesDone, tiers: [1, 3, 5], fmtCurrent: v => `${v} challenge${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
+  return groups;
+}
+function badgeGroupEarnedCount(g) { return g.tiers.filter(t => g.current >= t).length; }
+function renderBadgeGroupHTML(g) {
+  const nextTier = g.tiers.find(t => g.current < t);
+  const chips = g.tiers.map(t => {
+    const earned = g.current >= t;
+    return `<div class="badge-tier ${earned ? 'earned' : 'locked'}">
+      <div class="ic">${earned ? g.icon : '🔒'}</div>
+      <div class="lbl">${g.fmtTarget(t)}</div>
+    </div>`;
+  }).join("");
+  const progressText = nextTier
+    ? `${g.fmtCurrent(g.current)} — prochain palier : ${g.fmtTarget(nextTier)}`
+    : `🎉 Tous les paliers débloqués !`;
+  return `<div class="card badge-group">
+    <div class="goal-head"><div class="name">${g.icon} ${g.title}</div></div>
+    <div class="badge-tier-row">${chips}</div>
+    <div style="font-size:12px;color:var(--text-muted);">${progressText}</div>
+  </div>`;
+}
+function openBadgesModal() {
+  const groups = buildBadgeGroups();
+  const earned = groups.reduce((t, g) => t + badgeGroupEarnedCount(g), 0);
+  const total = groups.reduce((t, g) => t + g.tiers.length, 0);
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>🏅 Mes badges</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <div style="text-align:center;margin-bottom:14px;font-size:14px;color:var(--text-muted);">${earned} / ${total} badges débloqués</div>
+      ${groups.map(renderBadgeGroupHTML).join("")}
+    </div>
+  </div>`;
+  mountModal(html);
+}
+
 /* ================= PROFIL ================= */
 function renderProfil() {
   const shoes = DATA.shoes.filter(s => s.active !== false);
   const retiredShoes = DATA.shoes.filter(s => s.active === false);
+  const badgeGroups = buildBadgeGroups();
+  const badgeEarned = badgeGroups.reduce((t, g) => t + badgeGroupEarnedCount(g), 0);
+  const badgeTotal = badgeGroups.reduce((t, g) => t + g.tiers.length, 0);
 
   return `
+  <div class="section-title">Badges</div>
+  <div class="card" data-action="open-badges" style="cursor:pointer">
+    <div class="stat-row"><div class="label">🏅 Badges débloqués</div><div class="value">${badgeEarned} / ${badgeTotal}</div></div>
+    <div style="text-align:center;margin-top:6px;"><span class="link">Voir tous mes badges →</span></div>
+  </div>
+
   <div class="section-title">Mes sports</div>
   <div class="card">
     ${SPORTS.map(s => `<div class="stat-row"><div class="label">${s.icon} ${s.name}</div><div class="value" style="font-weight:400;color:var(--text-muted);font-size:12px;">intégré</div></div>`).join("")}
@@ -1431,6 +1531,7 @@ function handleGlobalClick(e) {
     case "toggle-challenge-item": toggleChallengeItem(t.dataset.challengeId, t.dataset.itemId); render(); openChallengeDetailModal(t.dataset.challengeId); break;
     case "delete-challenge-item": deleteChallengeItem(t.dataset.challengeId, t.dataset.itemId); render(); openChallengeDetailModal(t.dataset.challengeId); break;
     case "add-sport": openSportModal(); break;
+    case "open-badges": openBadgesModal(); break;
     case "delete-custom-sport": {
       const count = activityCountForSport(id);
       const msg = count > 0
