@@ -834,15 +834,18 @@ function computeLongestRunningDayStreak() {
 function buildBadgeGroups() {
   const KM_TIERS = [10, 50, 100, 250, 500, 1000, 1500, 2000, 3000, 5000, 7500, 10000];
   const SWIM_TIERS = [1, 5, 10, 25, 50, 100];
+  const HYROX_TIERS = [8, 40, 80, 200, 400, 800]; // ~1, 5, 10, 25, 50, 100 courses (8 km/course)
   const SESSION_TIERS = [5, 10, 25, 50, 100, 250, 500];
   const groups = [];
   getAllSports().forEach(s => {
     if (s.distance) {
       const current = aggForSport(getActivities({ sport: s.id })).distance;
-      const tiers = s.distanceUnit === "m" ? SWIM_TIERS : KM_TIERS;
+      const tiers = s.distanceUnit === "m" ? SWIM_TIERS : (s.id === "hyrox" ? HYROX_TIERS : KM_TIERS);
       groups.push({
         id: "dist-" + s.id, icon: s.icon, title: `Distance – ${s.name}`,
-        current, tiers, fmtCurrent: v => fmtKm(v), fmtTarget: v => `${v} km`
+        current, tiers,
+        fmtCurrent: v => fmtKm(v),
+        fmtTarget: s.id === "hyrox" ? (v => `${Math.round(v / 8)} course${Math.round(v / 8) > 1 ? "s" : ""}`) : (v => `${v} km`)
       });
     } else {
       const current = activityCountForSport(s.id);
