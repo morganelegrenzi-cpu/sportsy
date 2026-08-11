@@ -818,8 +818,21 @@ function computeLongestStreak() {
   }
   return best;
 }
+function computeLongestRunningDayStreak() {
+  const dates = new Set(DATA.activities.filter(a => RUNNING_COMBO_SPORTS.includes(a.sport)).map(a => a.date));
+  if (!dates.size) return 0;
+  const sorted = Array.from(dates).sort();
+  let cursor = parseISO(sorted[0]);
+  const today = new Date();
+  let best = 0, cur = 0;
+  while (cursor <= today) {
+    if (dates.has(toISODate(cursor))) { cur++; best = Math.max(best, cur); } else { cur = 0; }
+    cursor = addDays(cursor, 1);
+  }
+  return best;
+}
 function buildBadgeGroups() {
-  const KM_TIERS = [10, 50, 100, 250, 500, 1000, 2500, 5000];
+  const KM_TIERS = [10, 50, 100, 250, 500, 1000, 1500, 2000, 3000, 5000, 7500, 10000];
   const SWIM_TIERS = [1, 5, 10, 25, 50, 100];
   const SESSION_TIERS = [5, 10, 25, 50, 100, 250, 500];
   const groups = [];
@@ -846,10 +859,13 @@ function buildBadgeGroups() {
   groups.push({ id: "elevation", icon: "⛰️", title: "Dénivelé cumulé", current: totalElevation, tiers: [1000, 5000, 10000, 25000, 50000], fmtCurrent: v => fmtElevation(v), fmtTarget: v => fmtElevation(v) });
 
   const streak = computeLongestStreak();
-  groups.push({ id: "streak", icon: "🔥", title: "Régularité (semaines d'affilée)", current: streak, tiers: [4, 8, 12, 26, 52], fmtCurrent: v => `${v} semaine${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+  groups.push({ id: "streak", icon: "🔥", title: "Régularité (semaines d'affilée)", current: streak, tiers: [4, 8, 12, 26, 52, 78, 104, 156, 260], fmtCurrent: v => `${v} semaine${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
+  const runningDayStreak = computeLongestRunningDayStreak();
+  groups.push({ id: "running-streak", icon: "🏃", title: "Running streak (CAP + Trail, jours d'affilée)", current: runningDayStreak, tiers: [3, 7, 14, 30, 60, 100, 180, 365, 500, 1000], fmtCurrent: v => `${v} jour${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
 
   const coursesDone = getCourses({ status: "done" }).length;
-  groups.push({ id: "courses", icon: "🏁", title: "Courses terminées", current: coursesDone, tiers: [1, 5, 10, 25, 50], fmtCurrent: v => `${v} course${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+  groups.push({ id: "courses", icon: "🏁", title: "Courses terminées", current: coursesDone, tiers: [1, 5, 10, 25, 50, 75, 100, 150], fmtCurrent: v => `${v} course${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
 
   const sportsTried = getAllSports().filter(s => activityCountForSport(s.id) > 0).length;
   groups.push({ id: "explorer", icon: "🧭", title: "Sports essayés", current: sportsTried, tiers: [3, 5, 7], fmtCurrent: v => `${v} sport${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
