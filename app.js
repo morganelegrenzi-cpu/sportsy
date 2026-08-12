@@ -831,22 +831,63 @@ function computeLongestRunningDayStreak() {
   }
   return best;
 }
+/* Paliers "voyage" pour la distance cumulée (marche, running combo...) */
+const THEMED_DISTANCE_INFO = [
+  { km: 1000, icon: "🇫🇷", label: "France", full: "Traversée de la France (1000 km)" },
+  { km: 4000, icon: "🇦🇺", label: "Australie", full: "Traversée de l'Australie, Perth → Sydney (4000 km)" },
+  { km: 5000, icon: "🇪🇺", label: "Europe", full: "Traversée de l'Europe, Lisbonne → l'Oural (5000 km)" },
+  { km: 8000, icon: "🌍", label: "Afrique", full: "Traversée de l'Afrique, Le Caire → Le Cap (8000 km)" },
+  { km: 17000, icon: "🌎", label: "Amériques", full: "Du Canada à la Patagonie (17 000 km)" },
+  { km: 40000, icon: "🌐", label: "Tour du monde", full: "Tour du monde (40 000 km)" }
+];
+/* Paliers "sommets" pour le dénivelé cumulé */
+const THEMED_ELEVATION_INFO = [
+  { m: 1000, icon: "🌋", label: "Puy de Dôme", full: "Puy de Dôme (1000 m)" },
+  { m: 4810, icon: "🏔️", label: "Mont Blanc", full: "Mont Blanc (4810 m)" },
+  { m: 5895, icon: "🌋", label: "Kilimanjaro", full: "Kilimanjaro (5895 m)" },
+  { m: 8849, icon: "🏔️", label: "Everest", full: "Everest (8849 m)" },
+  { m: 17698, icon: "🏔️", label: "2x Everest", full: "2x Everest (17 698 m)" },
+  { m: 44245, icon: "🏔️", label: "5x Everest", full: "5x Everest (44 245 m)" }
+];
+function themedDistanceGroup(id, icon, title, current) {
+  const byKm = Object.fromEntries(THEMED_DISTANCE_INFO.map(t => [t.km, t]));
+  return {
+    id, icon, title, current, tiers: THEMED_DISTANCE_INFO.map(t => t.km),
+    fmtCurrent: v => fmtKm(v),
+    fmtTarget: v => byKm[v] ? byKm[v].full : `${v} km`,
+    chipLabel: v => byKm[v] ? byKm[v].label : `${v} km`,
+    tierIcon: v => byKm[v] ? byKm[v].icon : icon
+  };
+}
+function themedElevationGroup(id, icon, title, current) {
+  const byM = Object.fromEntries(THEMED_ELEVATION_INFO.map(t => [t.m, t]));
+  return {
+    id, icon, title, current, tiers: THEMED_ELEVATION_INFO.map(t => t.m),
+    fmtCurrent: v => fmtElevation(v),
+    fmtTarget: v => byM[v] ? byM[v].full : fmtElevation(v),
+    chipLabel: v => byM[v] ? byM[v].label : fmtElevation(v),
+    tierIcon: v => byM[v] ? byM[v].icon : icon
+  };
+}
 function buildBadgeGroups() {
   const KM_TIERS = [10, 50, 100, 250, 500, 1000, 1500, 2000, 3000, 5000, 7500, 10000];
   const SWIM_TIERS = [1, 5, 10, 25, 50, 100];
-  const HYROX_TIERS = [8, 40, 80, 200, 400, 800]; // ~1, 5, 10, 25, 50, 100 courses (8 km/course)
   const SESSION_TIERS = [5, 10, 25, 50, 100, 250, 500];
   const groups = [];
   getAllSports().forEach(s => {
+    if (s.id === "hyrox") return; // pas de badges pour l'Hyrox (usage ponctuel)
+    const isMarche = (s.name || "").trim().toLowerCase() === "marche";
     if (s.distance) {
       const current = aggForSport(getActivities({ sport: s.id })).distance;
-      const tiers = s.distanceUnit === "m" ? SWIM_TIERS : (s.id === "hyrox" ? HYROX_TIERS : KM_TIERS);
-      groups.push({
-        id: "dist-" + s.id, icon: s.icon, title: `Distance – ${s.name}`,
-        current, tiers,
-        fmtCurrent: v => fmtKm(v),
-        fmtTarget: s.id === "hyrox" ? (v => `${Math.round(v / 8)} course${Math.round(v / 8) > 1 ? "s" : ""}`) : (v => `${v} km`)
-      });
+      if (isMarche) {
+        groups.push(themedDistanceGroup("dist-" + s.id, s.icon, `Distance – ${s.name}`, current));
+      } else {
+        const tiers = s.distanceUnit === "m" ? SWIM_TIERS : KM_TIERS;
+        groups.push({
+          id: "dist-" + s.id, icon: s.icon, title: `Distance – ${s.name}`,
+          current, tiers, fmtCurrent: v => fmtKm(v), fmtTarget: v => `${v} km`
+        });
+      }
     } else {
       const current = activityCountForSport(s.id);
       groups.push({
@@ -855,11 +896,15 @@ function buildBadgeGroups() {
       });
     }
   });
+
+  const runningComboDistance = DATA.activities.filter(a => RUNNING_COMBO_SPORTS.includes(a.sport)).reduce((t, a) => t + distanceKm(a), 0);
+  groups.push(themedDistanceGroup("dist-running-combo", "🏃", "Distance – Running (CAP + Trail)", runningComboDistance));
+
   const totalSessions = DATA.activities.length;
   groups.push({ id: "total-sessions", icon: "🎯", title: "Total séances (tous sports)", current: totalSessions, tiers: [10, 25, 50, 100, 250, 500, 1000], fmtCurrent: v => `${v} séance${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
 
   const totalElevation = totalsAll(DATA.activities).elevation;
-  groups.push({ id: "elevation", icon: "⛰️", title: "Dénivelé cumulé", current: totalElevation, tiers: [1000, 5000, 10000, 25000, 50000], fmtCurrent: v => fmtElevation(v), fmtTarget: v => fmtElevation(v) });
+  groups.push(themedElevationGroup("elevation", "⛰️", "Dénivelé cumulé", totalElevation));
 
   const streak = computeLongestStreak();
   groups.push({ id: "streak", icon: "🔥", title: "Régularité (semaines d'affilée)", current: streak, tiers: [4, 8, 12, 26, 52, 78, 104, 156, 260], fmtCurrent: v => `${v} semaine${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
@@ -883,9 +928,11 @@ function renderBadgeGroupHTML(g) {
   const nextTier = g.tiers.find(t => g.current < t);
   const chips = g.tiers.map(t => {
     const earned = g.current >= t;
+    const icon = earned ? (g.tierIcon ? g.tierIcon(t) : g.icon) : '🔒';
+    const label = g.chipLabel ? g.chipLabel(t) : g.fmtTarget(t);
     return `<div class="badge-tier ${earned ? 'earned' : 'locked'}">
-      <div class="ic">${earned ? g.icon : '🔒'}</div>
-      <div class="lbl">${g.fmtTarget(t)}</div>
+      <div class="ic">${icon}</div>
+      <div class="lbl">${label}</div>
     </div>`;
   }).join("");
   const progressText = nextTier
