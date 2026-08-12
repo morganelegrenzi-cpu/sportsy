@@ -244,6 +244,7 @@ function afterRender() {
   if (state.page === "stats") mountStatsChart();
   if (state.page === "bilans" && state.bilanTab === "annuel") mountBilanYearChart();
   if (state.page === "bilans" && state.bilanTab === "mensuel") mountBilanMonthChart();
+  if (state.page === "objectifs" && state.objTab === "steps") mountStepsChart();
 }
 
 /* ================= ACCUEIL ================= */
@@ -495,15 +496,103 @@ function weeksSinceFirstActivity() {
 
 /* ================= OBJECTIFS ================= */
 function renderObjectifs() {
+  if (state.objTab === "steps") {
+    return `
+    <div class="sport-tabs">
+      <div class="sport-tab" data-action="obj-tab" data-tab="week">Hebdomadaires</div>
+      <div class="sport-tab" data-action="obj-tab" data-tab="year">Annuels</div>
+      <div class="sport-tab active" data-action="obj-tab" data-tab="steps">👣 Pas quotidiens</div>
+    </div>
+    ${renderStepsTab()}
+    `;
+  }
   const goals = DATA.goals.filter(g => g.period === state.objTab);
   return `
   <div class="sport-tabs">
     <div class="sport-tab ${state.objTab==='week'?'active':''}" data-action="obj-tab" data-tab="week">Hebdomadaires</div>
     <div class="sport-tab ${state.objTab==='year'?'active':''}" data-action="obj-tab" data-tab="year">Annuels</div>
+    <div class="sport-tab" data-action="obj-tab" data-tab="steps">👣 Pas quotidiens</div>
   </div>
   <button class="fab-add" data-action="add-goal">+ Ajouter un objectif</button>
   ${goals.length ? goals.map(goalCardFull).join("") : `<div class="empty-state"><div class="emoji">🎯</div>Aucun objectif ${state.objTab==='week'?'hebdomadaire':'annuel'} pour l'instant.</div>`}
   `;
+}
+
+/* ---- Pas quotidiens ---- */
+function renderStepsTab() {
+  const todayGoal = getStepGoalForDate(todayISO());
+  const days = [];
+  for (let i = 0; i < 14; i++) days.push(toISODate(addDays(new Date(), -i)));
+  const rows = days.map(d => {
+    const count = getStepsForDay(d);
+    const goal = getStepGoalForDate(d);
+    const met = count != null && goal != null && count >= goal;
+    return `<div class="stat-row" data-action="edit-steps-day" data-date="${d}" style="cursor:pointer">
+      <div class="label">${fmtDateShort(d)}${goal != null ? ` <span style="color:var(--text-muted);font-weight:400;font-size:11px;">(objectif : ${fmtNum(goal)})</span>` : ""}</div>
+      <div class="value">${count != null ? `${fmtNum(count)} pas ${goal != null ? (met ? "✅" : "❌") : ""}` : "—"}</div>
+    </div>`;
+  }).join("");
+  const goalHistory = (DATA.stepGoals || []).slice().sort((a, b) => b.startDate.localeCompare(a.startDate));
+  const historyRows = goalHistory.map(g => `<div class="stat-row">
+    <div class="label">Depuis le ${fmtDateShort(g.startDate)}</div>
+    <div class="value">${fmtNum(g.target)} pas/jour <button data-action="delete-step-goal" data-id="${g.id}" style="border:none;background:none;color:var(--text-muted);margin-left:6px;">🗑️</button></div>
+  </div>`).join("");
+
+  return `
+  <div class="card">
+    <div class="stat-row"><div class="label">🎯 Objectif actuel</div><div class="value">${todayGoal != null ? `${fmtNum(todayGoal)} pas / jour` : "Pas encore défini"}</div></div>
+    <button class="btn btn-outline btn-block" data-action="add-step-goal" style="margin-top:10px;">🎯 Définir / changer l'objectif</button>
+  </div>
+  <button class="fab-add" data-action="add-steps-day">+ Enregistrer mes pas du jour</button>
+  <div class="section-title">Évolution (14 derniers jours)</div>
+  <div class="card"><canvas id="chart-steps" height="160"></canvas></div>
+  <div class="section-title">Derniers jours</div>
+  <div class="card">${rows}</div>
+  ${goalHistory.length ? `<div class="section-title">Historique de l'objectif</div><div class="card">${historyRows}</div>` : ""}
+  `;
+}
+function mountStepsChart() {
+  const canvas = document.getElementById("chart-steps");
+  if (!canvas) return;
+  const days = [];
+  for (let i = 13; i >= 0; i--) days.push(toISODate(addDays(new Date(), -i)));
+  const labels = days.map(d => { const dd = parseISO(d); return `${dd.getDate()}/${dd.getMonth()+1}`; });
+  const stepsData = days.map(d => getStepsForDay(d) || 0);
+  const goalData = days.map(d => getStepGoalForDate(d));
+  if (charts["chart-steps"]) charts["chart-steps"].destroy();
+  const ctx = canvas.getContext("2d");
+  charts["chart-steps"] = new Chart(ctx, {
+    data: {
+      labels,
+      datasets: [
+        { type: "bar", label: "Pas", data: stepsData, backgroundColor: "#FC4C02", borderRadius: 4 },
+        { type: "line", label: "Objectif", data: goalData, borderColor: "#495057", borderDash: [5, 4], pointRadius: 0, borderWidth: 2, fill: false, spanGaps: true }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
+        y: { beginAtZero: true, ticks: { font: { size: 10 } } }
+      }
+    }
+  });
+}
+function computeLongestStepsGoalStreak() {
+  if (!DATA.steps.length) return 0;
+  const sorted = DATA.steps.map(s => s.date).sort();
+  let cursor = parseISO(sorted[0]);
+  const today = new Date();
+  let best = 0, cur = 0;
+  while (cursor <= today) {
+    const iso = toISODate(cursor);
+    const count = getStepsForDay(iso);
+    const goal = getStepGoalForDate(iso);
+    if (count != null && goal != null && count >= goal) { cur++; best = Math.max(best, cur); } else { cur = 0; }
+    cursor = addDays(cursor, 1);
+  }
+  return best;
 }
 function goalCardFull(g) {
   const label = goalSportLabel(g);
@@ -912,6 +1001,9 @@ function buildBadgeGroups() {
   const runningDayStreak = computeLongestRunningDayStreak();
   groups.push({ id: "running-streak", icon: "🏃", title: "Running streak (CAP + Trail, jours d'affilée)", current: runningDayStreak, tiers: [3, 7, 14, 30, 60, 100, 180, 365, 500, 1000], fmtCurrent: v => `${v} jour${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
 
+  const stepsStreak = computeLongestStepsGoalStreak();
+  groups.push({ id: "steps-streak", icon: "👣", title: "Streak pas quotidiens (objectif atteint)", current: stepsStreak, tiers: [3, 7, 14, 30, 60, 100, 180, 365, 500, 1000], fmtCurrent: v => `${v} jour${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
   const coursesDone = getCourses({ status: "done" }).length;
   groups.push({ id: "courses", icon: "🏁", title: "Courses terminées", current: coursesDone, tiers: [1, 5, 10, 25, 50, 75, 100, 150], fmtCurrent: v => `${v} course${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
 
@@ -1217,6 +1309,52 @@ function saveGoalForm(form) {
   const id = form.dataset.id;
   if (id) updateGoal(id, goal); else addGoal(goal);
   closeModal(); render(); showToast("Objectif enregistré 🎯");
+}
+
+/* ================= MODALS: PAS QUOTIDIENS ================= */
+function openStepGoalModal() {
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>🎯 Objectif de pas</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <form id="form-step-goal">
+        <div class="form-group"><label>Nouvel objectif (pas / jour)</label><input type="number" min="0" step="100" name="target" required placeholder="Ex : 10000"></div>
+        <div class="form-group"><label>À partir de quelle date ?</label><input type="date" name="startDate" value="${todayISO()}" required></div>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:-4px;">Les jours précédant cette date resteront évalués avec l'ancien objectif — rien n'est recalculé rétroactivement. Tu peux aussi choisir une date passée si tu changes l'historique.</p>
+        <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
+      </form>
+    </div>
+  </div>`;
+  mountModal(html);
+}
+function saveStepGoalForm(form) {
+  const fd = new FormData(form);
+  addStepGoal(Number(fd.get("target")), fd.get("startDate"));
+  closeModal(); render(); showToast("Objectif de pas enregistré 🎯");
+}
+function openStepsDayModal(date) {
+  const d = date || todayISO();
+  const existing = getStepsForDay(d);
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>👣 Pas du jour</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <form id="form-steps-day">
+        <div class="form-group"><label>Date</label><input type="date" name="date" value="${d}" required></div>
+        <div class="form-group"><label>Nombre de pas</label><input type="number" min="0" name="count" value="${existing != null ? existing : ''}" required placeholder="Ex : 8500"></div>
+        <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
+        ${existing != null ? `<button type="button" class="btn btn-danger btn-block" data-action="delete-steps-day" data-date="${d}">Supprimer cette entrée</button>` : ""}
+      </form>
+    </div>
+  </div>`;
+  mountModal(html);
+}
+function saveStepsDayForm(form) {
+  const fd = new FormData(form);
+  setStepsForDay(fd.get("date"), Number(fd.get("count")));
+  closeModal(); render(); showToast("Pas enregistrés 👣");
 }
 
 /* ================= MODALS: SHOE ================= */
@@ -1575,6 +1713,11 @@ function handleGlobalClick(e) {
     case "bilan-next-year": state.bilanYear++; render(); break;
     case "obj-tab": state.objTab = t.dataset.tab; render(); break;
     case "add-goal": openGoalModal(); break;
+    case "add-step-goal": openStepGoalModal(); break;
+    case "add-steps-day": openStepsDayModal(); break;
+    case "edit-steps-day": openStepsDayModal(t.dataset.date); break;
+    case "delete-steps-day": if (confirm("Supprimer cette entrée de pas ?")) { deleteStepsForDay(t.dataset.date); closeModal(); render(); showToast("Entrée supprimée"); } break;
+    case "delete-step-goal": if (confirm("Supprimer ce changement d'objectif ?")) { deleteStepGoal(id); render(); } break;
     case "edit-goal": openGoalModal(id); break;
     case "delete-goal": if (confirm("Supprimer cet objectif ?")) { deleteGoal(id); render(); } break;
     case "add-shoe": openShoeModal(); break;
@@ -1634,6 +1777,8 @@ function shiftBilanMonth(delta) {
 function handleGlobalSubmit(e) {
   if (e.target.id === "form-activity") { e.preventDefault(); saveActivityForm(e.target); }
   if (e.target.id === "form-goal") { e.preventDefault(); saveGoalForm(e.target); }
+  if (e.target.id === "form-step-goal") { e.preventDefault(); saveStepGoalForm(e.target); }
+  if (e.target.id === "form-steps-day") { e.preventDefault(); saveStepsDayForm(e.target); }
   if (e.target.id === "form-shoe") { e.preventDefault(); saveShoeForm(e.target); }
   if (e.target.id === "form-sport") { e.preventDefault(); saveSportForm(e.target); }
   if (e.target.id === "form-course") { e.preventDefault(); saveCourseForm(e.target); }

@@ -26,6 +26,8 @@ const DEFAULT_DATA = {
   courses: [],      // {id, name, sport, status:'wishlist'|'planned'|'done', date, location, distanceLabel, resultTime, notes, photos:[dataURL], wantToRedo}
   challenges: [],   // {id, name, description, items:[{id,label,done,doneDate}]}
   customSports: [], // {id, name, icon, color, distance, elevation, pace, trackShoes}
+  steps: [],        // {id, date:"YYYY-MM-DD", count}
+  stepGoals: [],    // {id, target, startDate:"YYYY-MM-DD"} — objectif applicable à partir de startDate (jusqu'au prochain changement)
   settings: { name: "" }
 };
 
@@ -245,6 +247,40 @@ function deleteChallengeItem(challengeId, itemId) {
 function todayISOSafe() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/* ---------- Pas quotidiens ---------- */
+function setStepsForDay(date, count) {
+  const existing = DATA.steps.find(s => s.date === date);
+  if (existing) existing.count = count;
+  else DATA.steps.push({ id: uid(), date, count });
+  persist();
+}
+function deleteStepsForDay(date) {
+  DATA.steps = DATA.steps.filter(s => s.date !== date);
+  persist();
+}
+function getStepsForDay(date) {
+  const s = DATA.steps.find(x => x.date === date);
+  return s ? s.count : null;
+}
+function addStepGoal(target, startDate) {
+  DATA.stepGoals = DATA.stepGoals || [];
+  const existing = DATA.stepGoals.find(g => g.startDate === startDate);
+  if (existing) existing.target = Number(target);
+  else DATA.stepGoals.push({ id: uid(), target: Number(target), startDate });
+  DATA.stepGoals.sort((a, b) => a.startDate.localeCompare(b.startDate));
+  persist();
+}
+function deleteStepGoal(id) {
+  DATA.stepGoals = (DATA.stepGoals || []).filter(g => g.id !== id);
+  persist();
+}
+function getStepGoalForDate(date) {
+  const applicable = (DATA.stepGoals || []).filter(g => g.startDate <= date);
+  if (!applicable.length) return null;
+  applicable.sort((a, b) => b.startDate.localeCompare(a.startDate));
+  return applicable[0].target;
 }
 
 /* ---------- Export / Import ---------- */
