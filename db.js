@@ -28,6 +28,9 @@ const DEFAULT_DATA = {
   customSports: [], // {id, name, icon, color, distance, elevation, pace, trackShoes}
   steps: [],        // {id, date:"YYYY-MM-DD", count}
   stepGoals: [],    // {id, target, startDate:"YYYY-MM-DD"} — objectif applicable à partir de startDate (jusqu'au prochain changement)
+  workoutLogs: [],  // {id, programId, date:"YYYY-MM-DD", durationMin, exercises:[{exerciseId, setsDone, weight, feeling}]}
+  weightLogs: [],   // {id, date:"YYYY-MM-DD", weight(kg), duringPeriod:bool, photos:[dataURL], note}
+  measurements: [], // {id, date:"YYYY-MM-DD", waist, hips, glutes, thighs, notes} — saisie libre, sans rythme imposé
   settings: { name: "" }
 };
 
@@ -281,6 +284,67 @@ function getStepGoalForDate(date) {
   if (!applicable.length) return null;
   applicable.sort((a, b) => b.startDate.localeCompare(a.startDate));
   return applicable[0].target;
+}
+
+/* ---------- Entraînement (renfo) ---------- */
+function addWorkoutLog(log) {
+  log.id = uid();
+  DATA.workoutLogs = DATA.workoutLogs || [];
+  DATA.workoutLogs.push(log);
+  persist();
+  return log;
+}
+function deleteWorkoutLog(id) {
+  DATA.workoutLogs = (DATA.workoutLogs || []).filter(l => l.id !== id);
+  persist();
+}
+function getWorkoutLogs(filter) {
+  let list = (DATA.workoutLogs || []).slice();
+  if (filter && filter.programId) list = list.filter(l => l.programId === filter.programId);
+  return list.sort((a, b) => b.date.localeCompare(a.date));
+}
+function lastWorkoutLogForProgram(programId) {
+  const list = getWorkoutLogs({ programId });
+  return list.length ? list[0] : null;
+}
+
+/* ---------- Suivi corporel (poids / mesures) ---------- */
+function addWeightLog(entry) {
+  entry.id = uid();
+  if (!entry.photos) entry.photos = [];
+  DATA.weightLogs = DATA.weightLogs || [];
+  DATA.weightLogs.push(entry);
+  DATA.weightLogs.sort((a, b) => a.date.localeCompare(b.date));
+  persist();
+  return entry;
+}
+function updateWeightLog(id, patch) {
+  const w = (DATA.weightLogs || []).find(x => x.id === id);
+  if (w) Object.assign(w, patch);
+  persist();
+  return w;
+}
+function deleteWeightLog(id) {
+  DATA.weightLogs = (DATA.weightLogs || []).filter(x => x.id !== id);
+  persist();
+}
+function getWeightLogs() {
+  return (DATA.weightLogs || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+}
+function addMeasurement(entry) {
+  entry.id = uid();
+  DATA.measurements = DATA.measurements || [];
+  DATA.measurements.push(entry);
+  DATA.measurements.sort((a, b) => a.date.localeCompare(b.date));
+  persist();
+  return entry;
+}
+function deleteMeasurement(id) {
+  DATA.measurements = (DATA.measurements || []).filter(x => x.id !== id);
+  persist();
+}
+function getMeasurements() {
+  return (DATA.measurements || []).slice().sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /* ---------- Export / Import ---------- */

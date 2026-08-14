@@ -99,13 +99,13 @@ main {
   align-items: center;
   gap: 2px;
   padding: 8px 1px 6px;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-muted);
   cursor: pointer;
   font-family: inherit;
   white-space: nowrap;
 }
-.navbtn .navicon { font-size: 18px; }
+.navbtn .navicon { font-size: 17px; }
 .navbtn.active { color: var(--orange); font-weight: 700; }
 
 /* CARDS */

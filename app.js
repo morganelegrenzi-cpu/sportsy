@@ -13,7 +13,9 @@ const state = {
   bilanSport: null,
   objTab: "week",
   coursesTab: "mescourses",
-  calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  entrainementView: "list",
+  entrainementProgramId: null
 };
 const charts = {};
 
@@ -226,13 +228,14 @@ function registerSW() {
 /* ---------------- RENDER ROOT ---------------- */
 function render() {
   const main = document.getElementById("main");
-  const titles = { accueil: "Mon Suivi Sport", stats: "Statistiques", objectifs: "Objectifs", courses: "Courses", bilans: "Bilans", profil: "Profil" };
+  const titles = { accueil: "Mon Suivi Sport", stats: "Statistiques", objectifs: "Objectifs", courses: "Courses", entrainement: "Renfo", bilans: "Bilans", profil: "Profil" };
   document.getElementById("topbarTitle").textContent = titles[state.page] || "Mon Suivi Sport";
   let html = "";
   if (state.page === "accueil") html = renderAccueil();
   else if (state.page === "stats") html = renderStats();
   else if (state.page === "objectifs") html = renderObjectifs();
   else if (state.page === "courses") html = renderCourses();
+  else if (state.page === "entrainement") html = renderEntrainement();
   else if (state.page === "bilans") html = renderBilans();
   else if (state.page === "profil") html = renderProfil();
   main.innerHTML = html;
@@ -1013,6 +1016,9 @@ function buildBadgeGroups() {
   const challengesDone = DATA.challenges.filter(ch => ch.items.length > 0 && ch.items.every(i => i.done)).length;
   groups.push({ id: "challenges", icon: "🏆", title: "Challenges complétés", current: challengesDone, tiers: [1, 3, 5], fmtCurrent: v => `${v} challenge${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
 
+  const workoutsDone = getWorkoutLogs().length;
+  groups.push({ id: "workouts", icon: "🏋️", title: "Séances de renfo", current: workoutsDone, tiers: [5, 10, 25, 50, 100, 250], fmtCurrent: v => `${v} séance${v > 1 ? "s" : ""}`, fmtTarget: v => `${v}` });
+
   return groups;
 }
 function badgeGroupEarnedCount(g) { return g.tiers.filter(t => g.current >= t).length; }
@@ -1052,6 +1058,312 @@ function openBadgesModal() {
   mountModal(html);
 }
 
+/* ================= ENTRAINEMENT (RENFO) ================= */
+const SVG_OPEN = `<svg viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" style="width:100%;height:100%">`;
+const EXERCISES = {
+  "hip-thrust": {
+    name: "Hip thrust", muscle: "Fessiers", sets: 4, reps: "10", restSec: 90, weighted: true,
+    instructions: "Épaules calées sur un banc, barre ou haltère posé sur les hanches, pieds à plat au sol. Pousse les hanches vers le haut jusqu'à aligner épaules-hanches-genoux, serre les fessiers en haut, redescends sans reposer complètement.",
+    svg: SVG_OPEN + `<line x1="5" y1="65" x2="35" y2="65"/><circle cx="24" cy="55" r="7"/><line x1="30" y1="63" x2="60" y2="50"/><line x1="60" y1="50" x2="80" y2="68"/><line x1="80" y1="68" x2="75" y2="95"/><line x1="30" y1="63" x2="15" y2="70"/><circle cx="60" cy="48" r="4"/></svg>`
+  },
+  "rdl": {
+    name: "Soulevé de terre roumain", muscle: "Fessiers / Ischios", sets: 4, reps: "8", restSec: 90, weighted: true,
+    instructions: "Haltères devant les cuisses, dos plat, bascule le buste vers l'avant en poussant les hanches vers l'arrière (genoux légèrement fléchis). Descends jusqu'à sentir l'étirement à l'arrière des cuisses, puis remonte en poussant les hanches vers l'avant.",
+    svg: SVG_OPEN + `<circle cx="50" cy="20" r="7"/><line x1="50" y1="27" x2="62" y2="55"/><line x1="62" y1="55" x2="64" y2="80"/><line x1="64" y1="80" x2="62" y2="98"/><line x1="52" y1="30" x2="35" y2="60"/><circle cx="33" cy="63" r="4"/></svg>`
+  },
+  "bulgarian-split-squat": {
+    name: "Fente bulgare", muscle: "Fessiers / Quadriceps", sets: 3, reps: "10 / jambe", restSec: 75, weighted: true,
+    instructions: "Pied arrière posé sur un banc derrière toi, descends en pliant le genou avant jusqu'à 90°, sans que le genou dépasse trop la pointe du pied. Remonte en poussant sur le talon avant.",
+    svg: SVG_OPEN + `<circle cx="35" cy="20" r="7"/><line x1="35" y1="27" x2="38" y2="55"/><line x1="38" y1="55" x2="55" y2="70"/><line x1="55" y1="70" x2="50" y2="95"/><line x1="38" y1="55" x2="20" y2="75"/><line x1="20" y1="75" x2="10" y2="60"/><line x1="0" y1="60" x2="18" y2="60"/></svg>`
+  },
+  "step-up": {
+    name: "Step-up avec montée de genou", muscle: "Fessiers / Quadriceps", sets: 3, reps: "10 / jambe", restSec: 75, weighted: true,
+    instructions: "Monte sur un banc/step avec une jambe en poussant sur le talon, monte l'autre genou haut devant toi en équilibre, puis redescends contrôlé.",
+    svg: SVG_OPEN + `<line x1="30" y1="80" x2="75" y2="80"/><circle cx="50" cy="20" r="7"/><line x1="50" y1="27" x2="52" y2="55"/><line x1="52" y1="55" x2="65" y2="78"/><line x1="52" y1="55" x2="35" y2="60"/><line x1="35" y1="60" x2="30" y2="45"/></svg>`
+  },
+  "glute-bridge-1leg": {
+    name: "Pont fessier unilatéral", muscle: "Fessiers", sets: 3, reps: "12 / jambe", restSec: 60, weighted: false,
+    instructions: "Allongée sur le dos, un pied au sol genou plié, l'autre jambe tendue en l'air. Pousse les hanches vers le haut en serrant le fessier du côté au sol, redescends sans reposer.",
+    svg: SVG_OPEN + `<circle cx="12" cy="73" r="6"/><line x1="18" y1="75" x2="55" y2="60"/><line x1="55" y1="60" x2="70" y2="75"/><line x1="70" y1="75" x2="65" y2="92"/><line x1="55" y1="60" x2="88" y2="52"/></svg>`
+  },
+  "kickback": {
+    name: "Kickback (extension de hanche)", muscle: "Fessiers", sets: 3, reps: "12 / jambe", restSec: 60, weighted: false,
+    instructions: "À quatre pattes (ou à la poulie/élastique), pousse une jambe vers l'arrière et le haut en gardant le genou plié à 90°, en serrant le fessier en fin de mouvement. Redescends contrôlé.",
+    svg: SVG_OPEN + `<circle cx="15" cy="40" r="6"/><line x1="20" y1="46" x2="55" y2="50"/><line x1="20" y1="46" x2="18" y2="80"/><line x1="55" y1="50" x2="58" y2="82"/><line x1="55" y1="50" x2="85" y2="35"/></svg>`
+  },
+  "db-row": {
+    name: "Rowing haltère", muscle: "Dos", sets: 4, reps: "10", restSec: 75, weighted: true,
+    instructions: "Buste penché en avant, dos plat, tire l'haltère vers la hanche en amenant le coude vers l'arrière, serre l'omoplate, redescends contrôlé.",
+    svg: SVG_OPEN + `<circle cx="30" cy="20" r="7"/><line x1="30" y1="27" x2="45" y2="55"/><line x1="45" y1="55" x2="48" y2="95"/><line x1="32" y1="30" x2="45" y2="50"/><circle cx="46" cy="50" r="4"/><line x1="32" y1="30" x2="20" y2="60"/></svg>`
+  },
+  "lat-pulldown": {
+    name: "Tirage vertical (ou traction assistée)", muscle: "Dos", sets: 3, reps: "8-10", restSec: 75, weighted: true,
+    instructions: "Tire la barre (ou fais une traction assistée) vers le haut de la poitrine en ramenant les coudes vers le bas et l'arrière, remonte contrôlé sans à-coup.",
+    svg: SVG_OPEN + `<line x1="20" y1="10" x2="80" y2="10"/><circle cx="50" cy="15" r="7"/><line x1="50" y1="22" x2="50" y2="55"/><line x1="45" y1="25" x2="25" y2="12"/><line x1="55" y1="25" x2="75" y2="12"/><line x1="50" y1="55" x2="50" y2="95"/></svg>`
+  },
+  "shoulder-press": {
+    name: "Développé épaules", muscle: "Épaules", sets: 3, reps: "10", restSec: 75, weighted: true,
+    instructions: "Haltères au niveau des épaules, pousse vers le haut jusqu'à extension complète des bras sans casser le dos, redescends contrôlé.",
+    svg: SVG_OPEN + `<circle cx="50" cy="25" r="7"/><line x1="50" y1="32" x2="50" y2="65"/><line x1="45" y1="35" x2="35" y2="10"/><circle cx="35" cy="10" r="4"/><line x1="55" y1="35" x2="65" y2="10"/><circle cx="65" cy="10" r="4"/><line x1="50" y1="65" x2="50" y2="95"/></svg>`
+  },
+  "pushup": {
+    name: "Pompes", muscle: "Pectoraux / Triceps", sets: 3, reps: "10-12", restSec: 60, weighted: false,
+    instructions: "En planche, mains sous les épaules, descends la poitrine vers le sol en gardant le corps aligné, repousse jusqu'à extension des bras. Sur les genoux si besoin.",
+    svg: SVG_OPEN + `<circle cx="15" cy="55" r="6"/><line x1="20" y1="52" x2="70" y2="58"/><line x1="22" y1="53" x2="28" y2="78"/><line x1="70" y1="58" x2="90" y2="60"/></svg>`
+  },
+  "bicep-curl": {
+    name: "Curl biceps", muscle: "Biceps", sets: 3, reps: "12", restSec: 60, weighted: true,
+    instructions: "Haltères le long du corps, plie les coudes pour amener les haltères vers les épaules sans bouger les coudes, redescends contrôlé.",
+    svg: SVG_OPEN + `<circle cx="50" cy="20" r="7"/><line x1="50" y1="27" x2="50" y2="60"/><line x1="45" y1="32" x2="42" y2="55"/><line x1="42" y1="55" x2="50" y2="38"/><circle cx="50" cy="36" r="4"/><line x1="55" y1="32" x2="58" y2="60"/><line x1="50" y1="60" x2="50" y2="95"/></svg>`
+  },
+  "triceps-extension": {
+    name: "Extension triceps", muscle: "Triceps", sets: 3, reps: "12", restSec: 60, weighted: true,
+    instructions: "Haltère tenu à deux mains derrière la tête, coudes pointés vers le haut, tends les bras vers le plafond puis redescends contrôlé.",
+    svg: SVG_OPEN + `<circle cx="50" cy="20" r="7"/><line x1="50" y1="27" x2="50" y2="60"/><line x1="55" y1="30" x2="68" y2="18"/><line x1="68" y1="18" x2="60" y2="40"/><circle cx="60" cy="40" r="4"/><line x1="50" y1="60" x2="50" y2="95"/></svg>`
+  },
+  "face-pull": {
+    name: "Face pull", muscle: "Épaules / Dos", sets: 3, reps: "15", restSec: 60, weighted: false,
+    instructions: "Élastique ou poulie à hauteur de visage, tire vers le visage en écartant les coudes vers l'extérieur et l'arrière, serre les omoplates.",
+    svg: SVG_OPEN + `<circle cx="50" cy="20" r="7"/><line x1="50" y1="27" x2="50" y2="60"/><line x1="43" y1="30" x2="25" y2="25"/><line x1="57" y1="30" x2="75" y2="25"/><line x1="25" y1="25" x2="75" y2="25"/><line x1="50" y1="60" x2="50" y2="95"/></svg>`
+  },
+  "plank": {
+    name: "Planche", muscle: "Gainage", sets: 3, reps: "30-45 sec", restSec: 45, weighted: false,
+    instructions: "Appui sur les avant-bras et les pointes de pieds, corps aligné de la tête aux talons, gaine le ventre et les fessiers sans creuser le dos.",
+    svg: SVG_OPEN + `<circle cx="15" cy="45" r="6"/><line x1="20" y1="42" x2="80" y2="50"/><line x1="21" y1="43" x2="21" y2="68"/><line x1="80" y1="50" x2="95" y2="55"/></svg>`
+  },
+  "side-plank": {
+    name: "Planche latérale", muscle: "Gainage / Obliques", sets: 3, reps: "20-30 sec / côté", restSec: 45, weighted: false,
+    instructions: "Appui sur un avant-bras, corps de profil aligné, hanches levées, l'autre bras vers le plafond. Garde le bassin haut sans s'affaisser.",
+    svg: SVG_OPEN + `<circle cx="20" cy="30" r="6"/><line x1="25" y1="32" x2="75" y2="45"/><line x1="26" y1="33" x2="26" y2="60"/><line x1="75" y1="45" x2="90" y2="50"/><line x1="26" y1="32" x2="15" y2="15"/></svg>`
+  },
+  "dead-bug": {
+    name: "Dead bug", muscle: "Gainage profond", sets: 3, reps: "10 / côté", restSec: 45, weighted: false,
+    instructions: "Allongée sur le dos, bras tendus vers le plafond, genoux pliés à 90°. Descends un bras et la jambe opposée vers le sol sans décoller le bas du dos, reviens et alterne.",
+    svg: SVG_OPEN + `<circle cx="20" cy="20" r="6"/><line x1="25" y1="22" x2="55" y2="25"/><line x1="27" y1="21" x2="12" y2="8"/><line x1="55" y1="25" x2="85" y2="15"/><line x1="52" y1="26" x2="58" y2="45"/><line x1="58" y1="45" x2="45" y2="48"/></svg>`
+  },
+  "mountain-climbers": {
+    name: "Mountain climbers", muscle: "Gainage / Cardio", sets: 3, reps: "20", restSec: 45, weighted: false,
+    instructions: "En planche haute, ramène rapidement un genou puis l'autre vers la poitrine, en gardant le bassin stable.",
+    svg: SVG_OPEN + `<circle cx="15" cy="45" r="6"/><line x1="20" y1="42" x2="75" y2="50"/><line x1="21" y1="43" x2="21" y2="68"/><line x1="75" y1="50" x2="95" y2="53"/><line x1="75" y1="50" x2="58" y2="65"/><line x1="58" y1="65" x2="62" y2="80"/></svg>`
+  },
+  "leg-raises": {
+    name: "Relevés de jambes", muscle: "Abdos (bas du ventre)", sets: 3, reps: "12", restSec: 45, weighted: false,
+    instructions: "Allongée sur le dos, jambes tendues, remonte-les à la verticale sans décoller le bas du dos du sol, redescends contrôlé sans les reposer complètement.",
+    svg: SVG_OPEN + `<circle cx="20" cy="80" r="6"/><line x1="25" y1="79" x2="55" y2="78"/><line x1="55" y1="78" x2="60" y2="25"/></svg>`
+  }
+};
+const WORKOUT_PROGRAMS = [
+  { id: "fessier", name: "Fessier / Bas du corps", icon: "🍑", exerciseIds: ["hip-thrust", "rdl", "bulgarian-split-squat", "step-up", "glute-bridge-1leg", "kickback"] },
+  { id: "hautducorps", name: "Haut du corps complet", icon: "💪", exerciseIds: ["db-row", "lat-pulldown", "shoulder-press", "pushup", "bicep-curl", "triceps-extension", "face-pull"] },
+  { id: "abdos", name: "Abdos express (15 min)", icon: "🔥", exerciseIds: ["plank", "side-plank", "dead-bug", "mountain-climbers", "leg-raises"] }
+];
+function getProgram(id) { return WORKOUT_PROGRAMS.find(p => p.id === id); }
+function feelingLabel(f) { return f === "hard" ? "😓 trop dur" : f === "easy" ? "😴 trop facile" : f === "ok" ? "👍 parfait" : ""; }
+function lastExerciseLog(programId, exerciseId) {
+  const logs = getWorkoutLogs({ programId });
+  for (const log of logs) {
+    const entry = (log.exercises || []).find(e => e.exerciseId === exerciseId);
+    if (entry && (entry.weight != null || entry.feeling)) return { date: log.date, weight: entry.weight, feeling: entry.feeling };
+  }
+  return null;
+}
+
+function renderEntrainement() {
+  if (state.entrainementView === "detail" && state.entrainementProgramId) return renderProgramDetail(state.entrainementProgramId);
+  return renderProgramList();
+}
+function renderProgramList() {
+  const totalLogs = getWorkoutLogs().length;
+  return `
+  <div class="card">
+    <div class="stat-row"><div class="label">🏋️ Séances de renfo enregistrées</div><div class="value">${totalLogs}</div></div>
+  </div>
+  ${WORKOUT_PROGRAMS.map(programCard).join("")}
+  `;
+}
+function programCard(p) {
+  const last = lastWorkoutLogForProgram(p.id);
+  return `<div class="card">
+    <div class="goal-head">
+      <div class="name">${p.icon} ${p.name}</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${p.exerciseIds.length} exercices ${last ? `· dernière séance : ${fmtDateShort(last.date)}` : "· pas encore faite"}</div>
+    <button class="btn btn-outline btn-block" data-action="view-program" data-id="${p.id}">Voir les exercices</button>
+    <button class="btn btn-primary btn-block" data-action="start-workout" data-id="${p.id}" style="margin-top:8px;">🚀 Lancer l'entraînement</button>
+  </div>`;
+}
+function renderProgramDetail(programId) {
+  const p = getProgram(programId);
+  if (!p) return renderProgramList();
+  return `
+  <div style="margin-bottom:10px;"><span class="link" data-action="back-to-programs">← Retour</span></div>
+  <div class="section-title">${p.icon} ${p.name}</div>
+  ${p.exerciseIds.map(exId => exerciseCard(exId, p.id)).join("")}
+  <button class="btn btn-primary btn-block" data-action="start-workout" data-id="${p.id}" style="margin-top:10px;">🚀 Lancer l'entraînement</button>
+  `;
+}
+function exerciseCard(exId, programId) {
+  const ex = EXERCISES[exId];
+  const last = ex.weighted && programId ? lastExerciseLog(programId, exId) : null;
+  return `<div class="card" style="display:flex;gap:12px;align-items:flex-start;">
+    <div style="width:56px;height:56px;flex:0 0 auto;color:var(--orange);">${ex.svg}</div>
+    <div>
+      <div style="font-weight:700;">${ex.name}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${ex.muscle} · ${ex.sets} x ${ex.reps} · repos ${ex.restSec}s</div>
+      <div style="font-size:12px;">${ex.instructions}</div>
+      ${last ? `<div style="font-size:11px;color:var(--orange-dark);margin-top:6px;">Dernière fois (${fmtDateShort(last.date)}) : ${last.weight != null ? last.weight + " kg · " : ""}${feelingLabel(last.feeling)}</div>` : ""}
+    </div>
+  </div>`;
+}
+
+/* ---- Lecteur d'entraînement (mode "Lancer") ---- */
+let workoutSession = null;
+function startWorkout(programId) {
+  const p = getProgram(programId);
+  if (!p) return;
+  if (workoutSession && workoutSession.restTimer) clearInterval(workoutSession.restTimer);
+  workoutSession = { programId, exIndex: 0, setsDone: 0, finished: false, resting: false, restRemaining: 0, restTimer: null, log: [], currentWeight: "", currentFeeling: null };
+  primeWeightFeelingForCurrentExercise();
+  renderWorkoutPlayerModal();
+}
+function currentSessionExercise() {
+  const p = getProgram(workoutSession.programId);
+  const exId = p.exerciseIds[workoutSession.exIndex];
+  return EXERCISES[exId] ? { id: exId, ...EXERCISES[exId] } : null;
+}
+function primeWeightFeelingForCurrentExercise() {
+  const ex = currentSessionExercise();
+  const last = ex.weighted ? lastExerciseLog(workoutSession.programId, ex.id) : null;
+  workoutSession.currentWeight = last && last.weight != null ? last.weight : "";
+  workoutSession.currentFeeling = null;
+}
+function renderWorkoutPlayerModal() {
+  if (!workoutSession) return;
+  const p = getProgram(workoutSession.programId);
+  if (workoutSession.finished) {
+    mountModal(`
+    <div class="modal-overlay">
+      <div class="modal-sheet" style="text-align:center;">
+        <div class="modal-handle"></div>
+        <div style="font-size:50px;margin:20px 0;">🎉</div>
+        <h2>Séance terminée !</h2>
+        <p style="color:var(--text-muted);">${p.name} · ${p.exerciseIds.length} exercices</p>
+        <button class="btn btn-primary btn-block" data-action="finish-workout">Enregistrer et fermer</button>
+      </div>
+    </div>`, { noOverlayClose: true });
+    return;
+  }
+  const ex = currentSessionExercise();
+  const totalEx = p.exerciseIds.length;
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet" style="text-align:center;">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2>${p.icon} ${p.name}</h2>
+        <button class="modal-close" data-action="quit-workout">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Exercice ${workoutSession.exIndex + 1} / ${totalEx}</div>
+      <div style="width:120px;height:120px;margin:0 auto;color:var(--orange);">${ex.svg}</div>
+      <div style="font-size:20px;font-weight:800;margin-top:10px;">${ex.name}</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">${ex.muscle}</div>
+      ${workoutSession.resting ? `
+        <div style="font-size:13px;color:var(--text-muted);">Repos</div>
+        <div style="font-size:44px;font-weight:800;color:var(--orange);margin:6px 0;">${workoutSession.restRemaining}s</div>
+        <button class="btn btn-outline btn-block" data-action="skip-rest">Passer le repos</button>
+      ` : `
+        <div style="font-size:16px;font-weight:700;margin-bottom:4px;">Série ${workoutSession.setsDone + 1} / ${ex.sets}</div>
+        <div style="font-size:14px;color:var(--text-muted);margin-bottom:16px;">${ex.reps}</div>
+        <p style="font-size:12px;color:var(--text-muted);">${ex.instructions}</p>
+        ${ex.weighted ? `
+        ${(() => { const last = lastExerciseLog(workoutSession.programId, ex.id); return last ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Dernière fois (${fmtDateShort(last.date)}) : ${last.weight != null ? last.weight + " kg · " : ""}${feelingLabel(last.feeling)}</div>` : ""; })()}
+        <div class="form-group" style="text-align:left;">
+          <label>Poids utilisé (kg)</label>
+          <input type="number" step="0.5" min="0" id="workoutWeightInput" value="${workoutSession.currentWeight}" placeholder="Ex : 12">
+        </div>
+        <div class="pill-select" style="justify-content:center;">
+          <div class="pill ${workoutSession.currentFeeling === 'hard' ? 'active' : ''}" data-action="set-workout-feeling" data-value="hard">😓 Trop dur</div>
+          <div class="pill ${workoutSession.currentFeeling === 'ok' ? 'active' : ''}" data-action="set-workout-feeling" data-value="ok">👍 Parfait</div>
+          <div class="pill ${workoutSession.currentFeeling === 'easy' ? 'active' : ''}" data-action="set-workout-feeling" data-value="easy">😴 Trop facile</div>
+        </div>
+        ` : ""}
+        <button class="btn btn-primary btn-block" data-action="complete-set" style="margin-top:10px;">✅ Série terminée</button>
+      `}
+    </div>
+  </div>`;
+  mountModal(html, { noOverlayClose: true });
+}
+function completeSet() {
+  const ex = currentSessionExercise();
+  workoutSession.setsDone++;
+  if (workoutSession.setsDone >= ex.sets) {
+    workoutSession.log.push({
+      exerciseId: ex.id, setsDone: workoutSession.setsDone,
+      weight: ex.weighted && workoutSession.currentWeight !== "" ? Number(workoutSession.currentWeight) : null,
+      feeling: ex.weighted ? workoutSession.currentFeeling : null
+    });
+    const p = getProgram(workoutSession.programId);
+    if (workoutSession.exIndex + 1 >= p.exerciseIds.length) {
+      workoutSession.finished = true;
+      renderWorkoutPlayerModal();
+      return;
+    }
+    workoutSession.exIndex++;
+    workoutSession.setsDone = 0;
+    primeWeightFeelingForCurrentExercise();
+    renderWorkoutPlayerModal();
+  } else {
+    startRest(ex.restSec);
+  }
+}
+function startRest(seconds) {
+  workoutSession.resting = true;
+  workoutSession.restRemaining = seconds;
+  renderWorkoutPlayerModal();
+  clearInterval(workoutSession.restTimer);
+  workoutSession.restTimer = setInterval(() => {
+    workoutSession.restRemaining--;
+    if (workoutSession.restRemaining <= 0) {
+      clearInterval(workoutSession.restTimer);
+      workoutSession.resting = false;
+      playBeep();
+      renderWorkoutPlayerModal();
+    } else {
+      renderWorkoutPlayerModal();
+    }
+  }, 1000);
+}
+function skipRest() {
+  clearInterval(workoutSession.restTimer);
+  workoutSession.resting = false;
+  renderWorkoutPlayerModal();
+}
+function quitWorkout() {
+  if (!confirm("Quitter l'entraînement en cours ? La progression de cette séance ne sera pas enregistrée.")) return;
+  clearInterval(workoutSession.restTimer);
+  workoutSession = null;
+  closeModal();
+}
+function finishWorkoutSave() {
+  addWorkoutLog({ programId: workoutSession.programId, date: todayISO(), exercises: workoutSession.log });
+  workoutSession = null;
+  closeModal();
+  render();
+  showToast("Séance enregistrée 💪");
+}
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.25);
+  } catch (e) {}
+}
+
 /* ================= PROFIL ================= */
 function renderProfil() {
   const shoes = DATA.shoes.filter(s => s.active !== false);
@@ -1060,7 +1372,16 @@ function renderProfil() {
   const badgeEarned = badgeGroups.reduce((t, g) => t + badgeGroupEarnedCount(g), 0);
   const badgeTotal = badgeGroups.reduce((t, g) => t + g.tiers.length, 0);
 
+  const weightLogs = getWeightLogs();
+  const lastWeight = weightLogs[0];
+
   return `
+  <div class="section-title">Suivi corporel</div>
+  <div class="card" data-action="open-body-tracking" style="cursor:pointer">
+    <div class="stat-row"><div class="label">⚖️ Dernier poids</div><div class="value">${lastWeight ? `${fmtNum(lastWeight.weight, 1)} kg` : "Pas encore enregistré"}</div></div>
+    <div style="text-align:center;margin-top:6px;"><span class="link">Voir le suivi →</span></div>
+  </div>
+
   <div class="section-title">Badges</div>
   <div class="card" data-action="open-badges" style="cursor:pointer">
     <div class="stat-row"><div class="label">🏅 Badges débloqués</div><div class="value">${badgeEarned} / ${badgeTotal}</div></div>
@@ -1122,6 +1443,122 @@ function shoeRow(s) {
     <div class="shoe-km-bar"><div class="fill ${pct>=90?'warn':''}" style="width:${pct}%"></div></div>
     ${pct>=90 ? `<div style="font-size:11px;color:var(--red);margin-top:4px;">⚠️ Cette paire approche ou dépasse ${threshold} km, pense à la remplacer !</div>` : ""}
   </div>`;
+}
+
+/* ================= SUIVI CORPOREL (poids / mesures / photos) ================= */
+let pendingWeightPhotos = [];
+let weightPhotoTargetLogId = null;
+function openBodyTrackingModal() {
+  const logs = getWeightLogs();
+  const last = logs[0];
+  const measurements = getMeasurements();
+
+  const periodNote = last && last.duringPeriod
+    ? `<div class="card" style="background:var(--orange-light);border:none;"><div style="font-size:12px;color:var(--orange-dark);">🩸 Ta dernière pesée a été faite pendant tes règles — le chiffre peut être temporairement plus élevé à cause de la rétention d'eau, ce n'est pas représentatif de ta tendance réelle. Pas de panique si ça n'a pas bougé (ou un peu monté) par rapport au mois dernier.</div></div>`
+    : "";
+
+  const rows = logs.map((log, i) => {
+    const prev = logs[i + 1];
+    const delta = prev ? Math.round((log.weight - prev.weight) * 10) / 10 : null;
+    const eligibleForPhoto = delta != null && Math.abs(delta) >= 1 && (!log.photos || !log.photos.length);
+    return `<div class="card" style="margin-bottom:8px;">
+      <div class="stat-row" style="border:none;padding:4px 0;">
+        <div class="label">${fmtDateShort(log.date)} ${log.duringPeriod ? "🩸" : ""}</div>
+        <div class="value">${fmtNum(log.weight, 1)} kg ${delta != null ? `<span style="font-size:11px;font-weight:600;color:var(--text-muted)">(${delta >= 0 ? "+" : ""}${fmtNum(delta, 1)} kg)</span>` : ""}
+          <button data-action="delete-weight-log" data-id="${log.id}" style="border:none;background:none;color:var(--text-muted);margin-left:4px;">🗑️</button>
+        </div>
+      </div>
+      ${log.photos && log.photos.length ? `<div class="photo-gallery">${log.photos.map(src => `<div class="photo-thumb"><img src="${src}" data-action="view-photo" data-src="${src}"></div>`).join("")}</div>` : ""}
+      ${eligibleForPhoto ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Écart de ${Math.abs(delta)} kg depuis la pesée précédente. <span class="link" data-action="trigger-weight-photo" data-id="${log.id}">📷 Ajouter une photo</span></div>` : ""}
+    </div>`;
+  }).join("");
+
+  const measurementRows = measurements.map(m => `<div class="stat-row">
+    <div class="label">${fmtDateShort(m.date)}</div>
+    <div class="value" style="font-size:12px;font-weight:400;">${[
+      m.waist ? `Taille ${m.waist}cm` : "", m.hips ? `Hanches ${m.hips}cm` : "",
+      m.glutes ? `Fessier ${m.glutes}cm` : "", m.thighs ? `Cuisses ${m.thighs}cm` : ""
+    ].filter(Boolean).join(" · ")} <button data-action="delete-measurement" data-id="${m.id}" style="border:none;background:none;color:var(--text-muted);">🗑️</button></div>
+  </div>`).join("");
+
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>⚖️ Suivi corporel</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      ${periodNote}
+      <form id="form-weight">
+        <div class="form-row">
+          <div class="form-group"><label>Date</label><input type="date" name="date" value="${todayISO()}" required></div>
+          <div class="form-group"><label>Poids (kg)</label><input type="number" step="0.1" min="0" name="weight" required placeholder="Ex : 68.5"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0;">
+          <input type="checkbox" name="duringPeriod" style="width:auto;"> 🩸 Je suis pendant mes règles (rétention d'eau probable)
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Enregistrer le poids</button>
+      </form>
+      ${logs.length >= 2 ? `<div class="section-title">Évolution</div><div class="card"><canvas id="chart-weight" height="140"></canvas></div>` : ""}
+      <div class="section-title">Historique</div>
+      ${rows || `<div class="empty-state" style="padding:20px;">Aucune pesée enregistrée pour l'instant.</div>`}
+      <input type="file" id="weightPhotoInputHidden" accept="image/*" multiple style="display:none">
+
+      <div class="section-title">Mesures (facultatif, sans rythme imposé)</div>
+      <button class="btn btn-outline btn-block" data-action="add-measurement">+ Ajouter une mesure</button>
+      ${measurements.length ? `<div class="card" style="margin-top:8px;">${measurementRows}</div>` : ""}
+    </div>
+  </div>`;
+  mountModal(html);
+  if (logs.length >= 2) mountWeightChart(logs);
+}
+function mountWeightChart(logs) {
+  const canvas = document.getElementById("chart-weight");
+  if (!canvas) return;
+  const sorted = logs.slice().reverse();
+  renderLineChart("chart-weight", sorted.map(l => fmtDateShort(l.date)), [
+    { label: "Poids (kg)", data: sorted.map(l => l.weight), color: "#FC4C02" }
+  ]);
+}
+function saveWeightForm(form) {
+  const fd = new FormData(form);
+  addWeightLog({ date: fd.get("date"), weight: Number(fd.get("weight")), duringPeriod: fd.get("duringPeriod") === "on", photos: [] });
+  showToast("Poids enregistré ⚖️");
+  render();
+  openBodyTrackingModal();
+}
+function openMeasurementModal() {
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>Nouvelle mesure</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <form id="form-measurement">
+        <div class="form-group"><label>Date</label><input type="date" name="date" value="${todayISO()}" required></div>
+        <div class="form-row">
+          <div class="form-group"><label>Taille (cm)</label><input type="number" step="0.5" min="0" name="waist" placeholder="Ex : 74"></div>
+          <div class="form-group"><label>Hanches (cm)</label><input type="number" step="0.5" min="0" name="hips" placeholder="Ex : 102"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Fessier (cm)</label><input type="number" step="0.5" min="0" name="glutes" placeholder="Ex : 106"></div>
+          <div class="form-group"><label>Cuisses (cm)</label><input type="number" step="0.5" min="0" name="thighs" placeholder="Ex : 58"></div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
+      </form>
+    </div>
+  </div>`;
+  mountModal(html);
+}
+function saveMeasurementForm(form) {
+  const fd = new FormData(form);
+  addMeasurement({
+    date: fd.get("date"),
+    waist: fd.get("waist") ? Number(fd.get("waist")) : null,
+    hips: fd.get("hips") ? Number(fd.get("hips")) : null,
+    glutes: fd.get("glutes") ? Number(fd.get("glutes")) : null,
+    thighs: fd.get("thighs") ? Number(fd.get("thighs")) : null
+  });
+  closeModal();
+  openBodyTrackingModal();
+  showToast("Mesure enregistrée 📏");
 }
 
 /* ================= CHARTS ================= */
@@ -1674,11 +2111,11 @@ function doResetData() {
 }
 
 /* ================= MODAL / MISC HELPERS ================= */
-function mountModal(html) {
+function mountModal(html, opts) {
   const root = document.getElementById("modalRoot");
   root.innerHTML = html;
   const overlay = root.querySelector(".modal-overlay");
-  if (overlay) {
+  if (overlay && !(opts && opts.noOverlayClose)) {
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
   }
 }
@@ -1740,7 +2177,20 @@ function handleGlobalClick(e) {
     case "toggle-challenge-item": toggleChallengeItem(t.dataset.challengeId, t.dataset.itemId); render(); openChallengeDetailModal(t.dataset.challengeId); break;
     case "delete-challenge-item": deleteChallengeItem(t.dataset.challengeId, t.dataset.itemId); render(); openChallengeDetailModal(t.dataset.challengeId); break;
     case "add-sport": openSportModal(); break;
+    case "view-program": state.entrainementView = "detail"; state.entrainementProgramId = id; render(); break;
+    case "back-to-programs": state.entrainementView = "list"; state.entrainementProgramId = null; render(); break;
+    case "start-workout": startWorkout(id); break;
+    case "complete-set": completeSet(); break;
+    case "skip-rest": skipRest(); break;
+    case "quit-workout": quitWorkout(); break;
+    case "finish-workout": finishWorkoutSave(); break;
+    case "set-workout-feeling": workoutSession.currentFeeling = t.dataset.value; renderWorkoutPlayerModal(); break;
     case "open-badges": openBadgesModal(); break;
+    case "open-body-tracking": openBodyTrackingModal(); break;
+    case "delete-weight-log": if (confirm("Supprimer cette pesée ?")) { deleteWeightLog(id); render(); openBodyTrackingModal(); } break;
+    case "trigger-weight-photo": weightPhotoTargetLogId = id; document.getElementById("weightPhotoInputHidden").click(); break;
+    case "add-measurement": openMeasurementModal(); break;
+    case "delete-measurement": if (confirm("Supprimer cette mesure ?")) { deleteMeasurement(id); openBodyTrackingModal(); } break;
     case "delete-custom-sport": {
       const count = activityCountForSport(id);
       const msg = count > 0
@@ -1781,6 +2231,8 @@ function handleGlobalSubmit(e) {
   if (e.target.id === "form-steps-day") { e.preventDefault(); saveStepsDayForm(e.target); }
   if (e.target.id === "form-shoe") { e.preventDefault(); saveShoeForm(e.target); }
   if (e.target.id === "form-sport") { e.preventDefault(); saveSportForm(e.target); }
+  if (e.target.id === "form-weight") { e.preventDefault(); saveWeightForm(e.target); }
+  if (e.target.id === "form-measurement") { e.preventDefault(); saveMeasurementForm(e.target); }
   if (e.target.id === "form-course") { e.preventDefault(); saveCourseForm(e.target); }
   if (e.target.id === "form-challenge") { e.preventDefault(); saveChallengeForm(e.target); }
   if (e.target.id === "form-challenge-additem") {
@@ -1803,6 +2255,10 @@ function handleGlobalSubmit(e) {
   }
 }
 function handleGlobalChange(e) {
+  if (e.target.id === "workoutWeightInput") {
+    if (workoutSession) workoutSession.currentWeight = e.target.value;
+    return;
+  }
   if (e.target.id === "importFile") {
     const file = e.target.files[0];
     if (!file) return;
@@ -1824,6 +2280,17 @@ function handleGlobalChange(e) {
     Promise.all(files.map(f => compressImageFile(f, 1000, 0.7).catch(() => null))).then(dataUrls => {
       pendingCoursePhotos.push(...dataUrls.filter(Boolean));
       refreshPhotoGallery();
+    });
+  }
+  if (e.target.id === "weightPhotoInputHidden") {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !weightPhotoTargetLogId) return;
+    Promise.all(files.map(f => compressImageFile(f, 1000, 0.7).catch(() => null))).then(dataUrls => {
+      const log = (DATA.weightLogs || []).find(w => w.id === weightPhotoTargetLogId);
+      const existing = log && log.photos ? log.photos : [];
+      updateWeightLog(weightPhotoTargetLogId, { photos: existing.concat(dataUrls.filter(Boolean)) });
+      weightPhotoTargetLogId = null;
+      openBodyTrackingModal();
     });
   }
 }
