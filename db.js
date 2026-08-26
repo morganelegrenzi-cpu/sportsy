@@ -31,6 +31,7 @@ const DEFAULT_DATA = {
   workoutLogs: [],  // {id, programId, date:"YYYY-MM-DD", durationMin, exercises:[{exerciseId, setsDone, weight, feeling}]}
   weightLogs: [],   // {id, date:"YYYY-MM-DD", weight(kg), duringPeriod:bool, photos:[dataURL], note}
   measurements: [], // {id, date:"YYYY-MM-DD", waist, hips, glutes, thighs, notes} — saisie libre, sans rythme imposé
+  roadmaps: [],     // {id, name, targetRace:{name,date,dossard,goalType:'finisher'|'temps',goalTime}, steps:[{id,name,date,dossard,done}], journal:[{id,date,category,text,test,resultat,verdict,photos:[dataURL]}]}
   settings: { name: "" }
 };
 
@@ -345,6 +346,75 @@ function deleteMeasurement(id) {
 }
 function getMeasurements() {
   return (DATA.measurements || []).slice().sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/* ---------- Road to... (roadmaps + journal de bord) ---------- */
+function addRoadmap(roadmap) {
+  roadmap.id = uid();
+  roadmap.steps = roadmap.steps || [];
+  roadmap.journal = roadmap.journal || [];
+  DATA.roadmaps = DATA.roadmaps || [];
+  DATA.roadmaps.push(roadmap);
+  persist();
+  return roadmap;
+}
+function updateRoadmap(id, patch) {
+  const r = (DATA.roadmaps || []).find(x => x.id === id);
+  if (r) Object.assign(r, patch);
+  persist();
+  return r;
+}
+function deleteRoadmap(id) {
+  DATA.roadmaps = (DATA.roadmaps || []).filter(x => x.id !== id);
+  persist();
+}
+function getRoadmaps() {
+  return (DATA.roadmaps || []).slice();
+}
+function getRoadmap(id) {
+  return (DATA.roadmaps || []).find(x => x.id === id);
+}
+function addRoadmapStep(roadmapId, step) {
+  const r = getRoadmap(roadmapId);
+  if (!r) return;
+  step.id = uid();
+  step.done = false;
+  r.steps.push(step);
+  r.steps.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+  persist();
+  return step;
+}
+function updateRoadmapStep(roadmapId, stepId, patch) {
+  const r = getRoadmap(roadmapId);
+  if (!r) return;
+  const s = r.steps.find(x => x.id === stepId);
+  if (s) Object.assign(s, patch);
+  r.steps.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+  persist();
+  return s;
+}
+function deleteRoadmapStep(roadmapId, stepId) {
+  const r = getRoadmap(roadmapId);
+  if (!r) return;
+  r.steps = r.steps.filter(x => x.id !== stepId);
+  persist();
+}
+function addJournalEntry(roadmapId, entry) {
+  const r = getRoadmap(roadmapId);
+  if (!r) return;
+  entry.id = uid();
+  if (!entry.photos) entry.photos = [];
+  if (!entry.date) entry.date = todayISOSafe();
+  r.journal.push(entry);
+  r.journal.sort((a, b) => b.date.localeCompare(a.date) || (b.id > a.id ? 1 : -1));
+  persist();
+  return entry;
+}
+function deleteJournalEntry(roadmapId, entryId) {
+  const r = getRoadmap(roadmapId);
+  if (!r) return;
+  r.journal = r.journal.filter(x => x.id !== entryId);
+  persist();
 }
 
 /* ---------- Export / Import ---------- */

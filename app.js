@@ -15,7 +15,8 @@ const state = {
   coursesTab: "mescourses",
   calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   entrainementView: "list",
-  entrainementProgramId: null
+  entrainementProgramId: null,
+  roadmapDetailId: null
 };
 const charts = {};
 
@@ -524,6 +525,7 @@ function renderObjectifs() {
 /* ---- Pas quotidiens ---- */
 function renderStepsTab() {
   const todayGoal = getStepGoalForDate(todayISO());
+  const currentStreak = computeCurrentStepsStreak();
   const days = [];
   for (let i = 0; i < 14; i++) days.push(toISODate(addDays(new Date(), -i)));
   const rows = days.map(d => {
@@ -544,6 +546,7 @@ function renderStepsTab() {
   return `
   <div class="card">
     <div class="stat-row"><div class="label">🎯 Objectif actuel</div><div class="value">${todayGoal != null ? `${fmtNum(todayGoal)} pas / jour` : "Pas encore défini"}</div></div>
+    <div class="stat-row"><div class="label">🔥 Streak actuelle</div><div class="value">${currentStreak > 0 ? `${currentStreak} jour${currentStreak > 1 ? "s" : ""} d'affilée` : "—"}</div></div>
     <button class="btn btn-outline btn-block" data-action="add-step-goal" style="margin-top:10px;">🎯 Définir / changer l'objectif</button>
   </div>
   <button class="fab-add" data-action="add-steps-day">+ Enregistrer mes pas du jour</button>
@@ -581,6 +584,30 @@ function mountStepsChart() {
       }
     }
   });
+}
+function computeCurrentStepsStreak() {
+  let cursor = new Date();
+  const todayIso = toISODate(cursor);
+  const todayCount = getStepsForDay(todayIso);
+  const todayGoal = getStepGoalForDate(todayIso);
+  if (todayCount != null) {
+    if (todayGoal == null || todayCount < todayGoal) return 0;
+  }
+  // si les pas du jour ne sont pas encore saisis, on ne casse pas la streak : on part d'hier
+  cursor = addDays(cursor, -1);
+  let streak = (todayCount != null) ? 1 : 0;
+  while (true) {
+    const iso = toISODate(cursor);
+    const count = getStepsForDay(iso);
+    const goal = getStepGoalForDate(iso);
+    if (count != null && goal != null && count >= goal) {
+      streak++;
+      cursor = addDays(cursor, -1);
+    } else {
+      break;
+    }
+  }
+  return streak;
 }
 function computeLongestStepsGoalStreak() {
   if (!DATA.steps.length) return 0;
@@ -794,8 +821,9 @@ function renderCourses() {
     <div class="sport-tab ${state.coursesTab==='mescourses'?'active':''}" data-action="courses-tab" data-tab="mescourses">Mes courses</div>
     <div class="sport-tab ${state.coursesTab==='wishlist'?'active':''}" data-action="courses-tab" data-tab="wishlist">Wishlist</div>
     <div class="sport-tab ${state.coursesTab==='challenges'?'active':''}" data-action="courses-tab" data-tab="challenges">Challenges</div>
+    <div class="sport-tab ${state.coursesTab==='roadto'?'active':''}" data-action="courses-tab" data-tab="roadto">🎯 Road to...</div>
   </div>
-  ${state.coursesTab === 'mescourses' ? renderCoursesMes() : state.coursesTab === 'wishlist' ? renderCoursesWishlist() : renderCoursesChallenges()}
+  ${state.coursesTab === 'mescourses' ? renderCoursesMes() : state.coursesTab === 'wishlist' ? renderCoursesWishlist() : state.coursesTab === 'challenges' ? renderCoursesChallenges() : renderCoursesRoadTo()}
   `;
 }
 function renderCoursesMes() {
@@ -893,6 +921,314 @@ function courseRowWishlist(c) {
       <button class="btn btn-danger btn-sm" data-action="delete-course" data-id="${c.id}">🗑️</button>
     </div>
   </div>`;
+}
+
+/* ================= ROAD TO... (objectifs long terme + journal de bord) ================= */
+const JOURNAL_CATEGORIES = [
+  { id: "nutrition", icon: "🍝", label: "Tests nutrition" },
+  { id: "materiel", icon: "🎒", label: "Tests matériel" },
+  { id: "pieds", icon: "🦶", label: "Pieds / ampoules" },
+  { id: "sensations", icon: "❤️", label: "Sensations" },
+  { id: "recuperation", icon: "😴", label: "Récupération" },
+  { id: "experience", icon: "🧪", label: "Expériences" }
+];
+function journalCategory(id) { return JOURNAL_CATEGORIES.find(c => c.id === id); }
+function daysUntil(dateIso) {
+  if (!dateIso) return null;
+  return Math.ceil((parseISO(dateIso) - parseISO(todayISO())) / 86400000);
+}
+function renderCoursesRoadTo() {
+  const roadmaps = getRoadmaps();
+  return `
+  <button class="fab-add" data-action="add-roadmap">+ Créer un « Road to... »</button>
+  ${roadmaps.length ? roadmaps.map(roadmapCard).join("") : `<div class="empty-state"><div class="emoji">🎯</div>Définis ta grande course objectif (UTMB, Diagonale des Fous, Saintélyon...) et les courses étapes qui t'y mèneront, avec un journal de bord pour suivre ta préparation.</div>`}
+  `;
+}
+function roadmapCard(r) {
+  const sp = getSport(r.sport);
+  const days = daysUntil(r.date);
+  const doneSteps = r.steps.filter(s => s.done).length;
+  const goalLabel = r.goalType === "temps" ? `⏱️ Objectif : ${r.goalTime || "temps à définir"}` : "🎯 Objectif : Finisher";
+  return `<div class="card course-card">
+    <div class="course-head">
+      <div>
+        <div class="course-title">${sp ? sp.icon : "🏁"} ${r.name}</div>
+        <div class="course-sub">${r.date ? fmtDateShort(r.date) : "Date approximative à définir"} · ${goalLabel}</div>
+      </div>
+      ${days !== null ? `<div class="countdown-badge">${days >= 0 ? "J-" + days : "Passée"}</div>` : ""}
+    </div>
+    <div class="roadmap-mini-stats">
+      <span class="badge ${r.dossard ? "badge-green" : ""}">${r.dossard ? "🎫 Dossard acheté" : "🎫 Dossard non acheté"}</span>
+      <span class="badge">🪜 ${doneSteps} / ${r.steps.length} étapes faites</span>
+      <span class="badge">📓 ${r.journal.length} entrée${r.journal.length > 1 ? "s" : ""} au journal</span>
+    </div>
+    <div class="course-actions">
+      <button class="btn btn-primary btn-sm" data-action="open-roadmap" data-id="${r.id}">📖 Ouvrir le journal</button>
+      <button class="btn btn-secondary btn-sm" data-action="edit-roadmap" data-id="${r.id}">✏️</button>
+      <button class="btn btn-danger btn-sm" data-action="delete-roadmap" data-id="${r.id}">🗑️</button>
+    </div>
+  </div>`;
+}
+function openRoadmapModal(existing) {
+  const r = existing || { name: "", sport: "trail", date: "", dossard: false, goalType: "finisher", goalTime: "" };
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2>${existing ? "Modifier l'objectif" : "🎯 Nouveau « Road to... »"}</h2>
+        <button class="modal-close" data-action="close-modal">✕</button>
+      </div>
+      <form id="form-roadmap" data-id="${existing ? existing.id : ""}">
+        <div class="form-group"><label>Nom de la course objectif</label><input type="text" name="name" value="${r.name || ""}" required placeholder="Ex : UTMB, Diagonale des Fous, Saintélyon..."></div>
+        <div class="form-group">
+          <label>Sport</label>
+          <input type="hidden" id="pill-roadmapsport-value" name="sport" value="${r.sport || "trail"}">
+          <div class="pill-select">
+            ${getAllSports().map(s => `<div class="pill ${r.sport===s.id?'active':''}" data-action="pill-choose" data-target="pill-roadmapsport-value" data-value="${s.id}">${s.icon} ${s.name}</div>`).join("")}
+          </div>
+        </div>
+        <div class="form-group"><label>📅 Date approximative de la course</label><input type="date" name="date" value="${r.date || ""}"></div>
+        <div class="form-group">
+          <label>🎯 Objectif</label>
+          <input type="hidden" id="pill-roadmapgoal-value" name="goalType" value="${r.goalType || "finisher"}">
+          <div class="pill-select">
+            <div class="pill ${(r.goalType||"finisher")==='finisher'?'active':''}" data-action="pill-choose" data-target="pill-roadmapgoal-value" data-value="finisher">🎯 Finisher</div>
+            <div class="pill ${r.goalType==='temps'?'active':''}" data-action="pill-choose" data-target="pill-roadmapgoal-value" data-value="temps">⏱️ Temps</div>
+          </div>
+        </div>
+        <div class="form-group field-roadmap-time"><label>Temps visé</label><input type="text" name="goalTime" value="${r.goalTime || ""}" placeholder="Ex : sous les 15h"></div>
+        <div class="form-group">
+          <label>🎫 Dossard</label>
+          <input type="hidden" id="pill-roadmapdossard-value" name="dossard" value="${r.dossard ? "1" : "0"}">
+          <div class="pill-select">
+            <div class="pill ${!r.dossard?'active':''}" data-action="pill-choose" data-target="pill-roadmapdossard-value" data-value="0">Non acheté</div>
+            <div class="pill ${r.dossard?'active':''}" data-action="pill-choose" data-target="pill-roadmapdossard-value" data-value="1">✅ Acheté</div>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">${existing ? "Enregistrer" : "Créer"}</button>
+        ${existing ? `<button type="button" class="btn btn-danger btn-block" data-action="delete-roadmap" data-id="${existing.id}">Supprimer ce « Road to... »</button>` : ""}
+      </form>
+    </div>
+  </div>`;
+  mountModal(html);
+  updateRoadmapFormFields();
+}
+function updateRoadmapFormFields() {
+  const form = document.getElementById("form-roadmap");
+  if (!form) return;
+  const goalType = document.getElementById("pill-roadmapgoal-value").value;
+  form.querySelector(".field-roadmap-time").style.display = goalType === "temps" ? "" : "none";
+}
+function saveRoadmapForm(form) {
+  const fd = new FormData(form);
+  const roadmap = {
+    name: fd.get("name"),
+    sport: fd.get("sport") || "trail",
+    date: fd.get("date") || "",
+    dossard: fd.get("dossard") === "1",
+    goalType: fd.get("goalType") || "finisher",
+    goalTime: fd.get("goalType") === "temps" ? (fd.get("goalTime") || "") : ""
+  };
+  const id = form.dataset.id;
+  if (id) {
+    updateRoadmap(id, roadmap);
+    closeModal(); render(); showToast("Objectif mis à jour");
+  } else {
+    addRoadmap(Object.assign({ steps: [], journal: [] }, roadmap));
+    closeModal(); render(); showToast("Nouveau « Road to... » créé 🎯");
+  }
+}
+function openRoadmapDetailModal(id) {
+  const r = getRoadmap(id);
+  if (!r) return;
+  state.roadmapDetailId = id;
+  const sp = getSport(r.sport);
+  const days = daysUntil(r.date);
+  const goalLabel = r.goalType === "temps" ? `⏱️ Objectif : ${r.goalTime || "temps à définir"}` : "🎯 Objectif : Finisher";
+  const stepsRows = r.steps.length
+    ? r.steps.map(s => roadmapStepRow(r, s)).join("")
+    : `<div class="empty-state" style="padding:16px 0;">Aucune étape pour l'instant — ajoute les courses qui te préparent à l'objectif.</div>`;
+  const journalRows = r.journal.length
+    ? r.journal.map(j => journalEntryRow(r, j)).join("")
+    : `<div class="empty-state" style="padding:16px 0;">Ton journal de bord est vide — note tes tests, sensations et expériences au fil de la prépa.</div>`;
+  const categoryButtons = JOURNAL_CATEGORIES.map(c => `<div class="pill" data-action="add-journal-entry" data-id="${r.id}" data-category="${c.id}">${c.icon} ${c.label}</div>`).join("");
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2>${sp ? sp.icon : "🏁"} ${r.name}</h2>
+        <button class="modal-close" data-action="close-modal">✕</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div class="course-sub">📅 ${r.date ? fmtDateShort(r.date) : "Date à définir"}${days !== null ? ` · ${days >= 0 ? "J-" + days : "Passée"}` : ""}</div>
+        <button data-action="edit-roadmap" data-id="${r.id}" style="border:none;background:none;color:var(--text-muted);font-size:16px;">✏️</button>
+      </div>
+      <div class="roadmap-mini-stats" style="margin-bottom:6px;">
+        <span class="badge">${goalLabel}</span>
+        <span class="badge ${r.dossard ? "badge-green" : ""}" data-action="toggle-roadmap-dossard" data-id="${r.id}" style="cursor:pointer;">${r.dossard ? "🎫 Dossard acheté" : "🎫 Dossard non acheté"}</span>
+      </div>
+
+      <div class="section-title">🪜 Étapes vers l'objectif</div>
+      <button class="btn btn-outline btn-block" data-action="add-roadmap-step" data-id="${r.id}">+ Ajouter une étape</button>
+      <div class="card" style="margin-top:8px;">${stepsRows}</div>
+
+      <div class="section-title">📓 Journal de bord</div>
+      <div class="pill-select" style="margin-bottom:10px;">${categoryButtons}</div>
+      ${journalRows}
+    </div>
+  </div>`;
+  mountModal(html);
+}
+function roadmapStepRow(r, s) {
+  const sp = getSport(s.sport);
+  return `<div class="stat-row" style="align-items:flex-start;">
+    <div class="label">
+      <div style="font-weight:700;${s.done ? "text-decoration:line-through;color:var(--text-muted);" : ""}">${sp ? sp.icon : "🏁"} ${s.name}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${s.date ? fmtDateShort(s.date) : "Date prévisionnelle non définie"}</div>
+    </div>
+    <div class="value" style="text-align:right;">
+      <div class="badge ${s.dossard ? "badge-green" : ""}" data-action="toggle-step-dossard" data-roadmap-id="${r.id}" data-step-id="${s.id}" style="cursor:pointer;margin-bottom:4px;">${s.dossard ? "🎫 Acheté" : "🎫 Non acheté"}</div>
+      <div>
+        <button data-action="toggle-step-done" data-roadmap-id="${r.id}" data-step-id="${s.id}" style="border:none;background:none;color:var(--text-muted);" title="Faite">${s.done ? "✅" : "⬜"}</button>
+        <button data-action="edit-roadmap-step" data-roadmap-id="${r.id}" data-step-id="${s.id}" style="border:none;background:none;color:var(--text-muted);">✏️</button>
+        <button data-action="delete-roadmap-step" data-roadmap-id="${r.id}" data-step-id="${s.id}" style="border:none;background:none;color:var(--text-muted);">🗑️</button>
+      </div>
+    </div>
+  </div>`;
+}
+function openRoadmapStepModal(roadmapId, stepId) {
+  const r = getRoadmap(roadmapId);
+  if (!r) return;
+  const s = stepId ? r.steps.find(x => x.id === stepId) : { name: "", sport: r.sport || "trail", date: "", dossard: false, done: false };
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>${stepId ? "Modifier l'étape" : "Nouvelle étape"}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <form id="form-roadmap-step" data-roadmap-id="${r.id}" data-step-id="${stepId || ""}">
+        <div class="form-group"><label>Nom de la course</label><input type="text" name="name" value="${s.name || ""}" required placeholder="Ex : Trail à définir, ou nom précis une fois choisi"></div>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:-6px;">Tu peux commencer par une simple prévision (ex : « trail ~30km courant mai ») et revenir modifier cette étape plus tard une fois la course précise choisie.</p>
+        <div class="form-group">
+          <label>Sport</label>
+          <input type="hidden" id="pill-stepsport-value" name="sport" value="${s.sport || "trail"}">
+          <div class="pill-select">
+            ${getAllSports().map(sp => `<div class="pill ${s.sport===sp.id?'active':''}" data-action="pill-choose" data-target="pill-stepsport-value" data-value="${sp.id}">${sp.icon} ${sp.name}</div>`).join("")}
+          </div>
+        </div>
+        <div class="form-group"><label>Date approximative</label><input type="date" name="date" value="${s.date || ""}"></div>
+        <div class="form-group">
+          <label>🎫 Dossard</label>
+          <input type="hidden" id="pill-stepdossard-value" name="dossard" value="${s.dossard ? "1" : "0"}">
+          <div class="pill-select">
+            <div class="pill ${!s.dossard?'active':''}" data-action="pill-choose" data-target="pill-stepdossard-value" data-value="0">Non acheté</div>
+            <div class="pill ${s.dossard?'active':''}" data-action="pill-choose" data-target="pill-stepdossard-value" data-value="1">✅ Acheté</div>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
+        ${stepId ? `<button type="button" class="btn btn-danger btn-block" data-action="delete-roadmap-step" data-roadmap-id="${r.id}" data-step-id="${stepId}">Supprimer cette étape</button>` : ""}
+      </form>
+    </div>
+  </div>`;
+  mountModal(html);
+}
+function saveRoadmapStepForm(form) {
+  const fd = new FormData(form);
+  const roadmapId = form.dataset.roadmapId;
+  const stepId = form.dataset.stepId;
+  const step = {
+    name: fd.get("name"),
+    sport: fd.get("sport") || "trail",
+    date: fd.get("date") || "",
+    dossard: fd.get("dossard") === "1"
+  };
+  if (stepId) updateRoadmapStep(roadmapId, stepId, step);
+  else addRoadmapStep(roadmapId, step);
+  closeModal(); render(); openRoadmapDetailModal(roadmapId);
+  showToast(stepId ? "Étape mise à jour" : "Étape ajoutée 🪜");
+}
+function journalEntryRow(r, j) {
+  const cat = journalCategory(j.category) || { icon: "📓", label: "" };
+  const photos = j.photos && j.photos.length ? `<div class="photo-gallery">${j.photos.map(src => `<div class="photo-thumb"><img src="${src}" data-action="view-photo" data-src="${src}"></div>`).join("")}</div>` : "";
+  let body = "";
+  if (j.category === "experience") {
+    body = `<div style="font-size:13px;margin-top:4px;">
+      <div><strong>Test :</strong> ${j.test || ""}</div>
+      <div><strong>Résultat :</strong> ${j.resultat || ""}</div>
+      <div><strong>Verdict :</strong> ${j.verdict === "adopte" ? "✅ Adopté" : j.verdict === "abandonne" ? "❌ Abandonné" : "—"}</div>
+    </div>`;
+  } else {
+    body = j.text ? `<div style="font-size:13px;margin-top:4px;">${j.text}</div>` : "";
+  }
+  return `<div class="card journal-entry-card">
+    <div class="goal-head">
+      <div class="name">${cat.icon} ${cat.label} <span style="font-weight:400;color:var(--text-muted);font-size:12px;">· ${fmtDateShort(j.date)}</span></div>
+      <div class="actions"><button data-action="delete-journal-entry" data-roadmap-id="${r.id}" data-entry-id="${j.id}">🗑️</button></div>
+    </div>
+    ${body}
+    ${photos}
+  </div>`;
+}
+function openJournalEntryModal(roadmapId, category) {
+  const cat = journalCategory(category);
+  if (!cat) return;
+  pendingJournalPhotos = [];
+  const isExperience = category === "experience";
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div class="modal-header"><h2>${cat.icon} ${cat.label}</h2><button class="modal-close" data-action="close-modal">✕</button></div>
+      <form id="form-journal-entry" data-roadmap-id="${roadmapId}" data-category="${category}">
+        <div class="form-group"><label>Date</label><input type="date" name="date" value="${todayISO()}" required></div>
+        ${isExperience ? `
+        <div class="form-group"><label>Test</label><input type="text" name="test" placeholder="Ex : chaussures X sur 3h30" required></div>
+        <div class="form-group"><label>Résultat</label><input type="text" name="resultat" placeholder="Ex : ampoule au pied gauche après 2h45" required></div>
+        <div class="form-group">
+          <label>Verdict</label>
+          <input type="hidden" id="pill-verdict-value" name="verdict" value="adopte">
+          <div class="pill-select">
+            <div class="pill active" data-action="pill-choose" data-target="pill-verdict-value" data-value="adopte">✅ Adopté</div>
+            <div class="pill" data-action="pill-choose" data-target="pill-verdict-value" data-value="abandonne">❌ Abandonné</div>
+          </div>
+        </div>
+        ` : `
+        <div class="form-group"><label>Note</label><textarea name="text" placeholder="Ce que tu veux garder en mémoire..." required></textarea></div>
+        `}
+        <div class="form-group">
+          <label>Photos</label>
+          <div class="photo-gallery" id="journalPhotoGalleryContainer">${renderJournalPhotoGalleryInner()}</div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Ajouter au journal</button>
+      </form>
+    </div>
+  </div>`;
+  mountModal(html);
+}
+function renderJournalPhotoGalleryInner() {
+  return pendingJournalPhotos.map((src, i) => `<div class="photo-thumb"><img src="${src}" data-action="view-photo" data-src="${src}"><button type="button" class="rm" data-action="remove-journal-photo" data-index="${i}">✕</button></div>`).join("") +
+    `<label class="photo-add-tile">📷<input type="file" id="journalPhotoInput" accept="image/*" multiple style="display:none"></label>`;
+}
+function refreshJournalPhotoGallery() {
+  const el = document.getElementById("journalPhotoGalleryContainer");
+  if (el) el.innerHTML = renderJournalPhotoGalleryInner();
+}
+function saveJournalEntryForm(form) {
+  const fd = new FormData(form);
+  const roadmapId = form.dataset.roadmapId;
+  const category = form.dataset.category;
+  const entry = { date: fd.get("date"), category, photos: pendingJournalPhotos.slice() };
+  if (category === "experience") {
+    entry.test = fd.get("test") || "";
+    entry.resultat = fd.get("resultat") || "";
+    entry.verdict = fd.get("verdict") || "adopte";
+  } else {
+    entry.text = fd.get("text") || "";
+  }
+  addJournalEntry(roadmapId, entry);
+  closeModal(); render(); openRoadmapDetailModal(roadmapId);
+  showToast("Entrée ajoutée au journal 📓");
 }
 
 /* ================= BADGES ================= */
@@ -1053,6 +1389,47 @@ function openBadgesModal() {
       <div class="modal-header"><h2>🏅 Mes badges</h2><button class="modal-close" data-action="close-modal">✕</button></div>
       <div style="text-align:center;margin-bottom:14px;font-size:14px;color:var(--text-muted);">${earned} / ${total} badges débloqués</div>
       ${groups.map(renderBadgeGroupHTML).join("")}
+    </div>
+  </div>`;
+  mountModal(html);
+}
+
+/* ---- Popup de déblocage de badge ---- */
+function snapshotBadgeState() {
+  return buildBadgeGroups().map(g => ({ id: g.id, earnedTiers: g.tiers.filter(t => g.current >= t) }));
+}
+function detectNewBadges(before) {
+  const after = buildBadgeGroups();
+  const newly = [];
+  after.forEach(g => {
+    const prev = before.find(b => b.id === g.id);
+    const prevTiers = prev ? prev.earnedTiers : [];
+    g.tiers.forEach(t => {
+      if (g.current >= t && !prevTiers.includes(t)) newly.push({ group: g, tier: t });
+    });
+  });
+  return newly;
+}
+function showBadgeUnlockPopup(newly) {
+  if (!newly || !newly.length) return;
+  const items = newly.map(({ group: g, tier: t }) => {
+    const icon = g.tierIcon ? g.tierIcon(t) : g.icon;
+    const label = g.chipLabel ? g.chipLabel(t) : g.fmtTarget(t);
+    return `<div class="badge-unlock-item">
+      <div class="ic">${icon}</div>
+      <div class="txt"><div class="title">${g.title}</div><div class="lbl">${label}</div></div>
+    </div>`;
+  }).join("");
+  const html = `
+  <div class="modal-overlay">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <div style="text-align:center;padding:6px 0 4px;">
+        <div style="font-size:44px;">🎉</div>
+        <h2 style="margin:6px 0 2px;">${newly.length > 1 ? "Nouveaux badges débloqués !" : "Nouveau badge débloqué !"}</h2>
+      </div>
+      ${items}
+      <button class="btn btn-primary btn-block" data-action="close-modal" style="margin-top:14px;">Continuer 🙌</button>
     </div>
   </div>`;
   mountModal(html);
@@ -1345,11 +1722,14 @@ function quitWorkout() {
   closeModal();
 }
 function finishWorkoutSave() {
+  const beforeBadges = snapshotBadgeState();
   addWorkoutLog({ programId: workoutSession.programId, date: todayISO(), exercises: workoutSession.log });
   workoutSession = null;
   closeModal();
   render();
   showToast("Séance enregistrée 💪");
+  const newly = detectNewBadges(beforeBadges);
+  if (newly.length) showBadgeUnlockPopup(newly);
 }
 function playBeep() {
   try {
@@ -1685,10 +2065,13 @@ function saveActivityForm(form) {
     notes: fd.get("notes") || ""
   };
   const id = form.dataset.id;
+  const beforeBadges = snapshotBadgeState();
   if (id) updateActivity(id, activity); else addActivity(activity);
   closeModal();
   render();
   showToast(id ? "Activité mise à jour" : "Activité ajoutée 💪");
+  const newly = detectNewBadges(beforeBadges);
+  if (newly.length) showBadgeUnlockPopup(newly);
 }
 function openActivityDetail(id) {
   const a = DATA.activities.find(x => x.id === id);
@@ -1790,8 +2173,11 @@ function openStepsDayModal(date) {
 }
 function saveStepsDayForm(form) {
   const fd = new FormData(form);
+  const beforeBadges = snapshotBadgeState();
   setStepsForDay(fd.get("date"), Number(fd.get("count")));
   closeModal(); render(); showToast("Pas enregistrés 👣");
+  const newly = detectNewBadges(beforeBadges);
+  if (newly.length) showBadgeUnlockPopup(newly);
 }
 
 /* ================= MODALS: SHOE ================= */
@@ -1821,6 +2207,7 @@ function saveShoeForm(form) {
 
 /* ================= MODALS: COURSE (course/wishlist/challenge) ================= */
 let pendingCoursePhotos = [];
+let pendingJournalPhotos = [];
 
 function compressImageFile(file, maxDim, quality) {
   return new Promise((resolve, reject) => {
@@ -1939,10 +2326,13 @@ function saveCourseForm(form) {
     photos: pendingCoursePhotos.slice()
   };
   const id = form.dataset.id;
+  const beforeBadges = snapshotBadgeState();
   if (id) updateCourse(id, course); else addCourse(course);
   closeModal();
   render();
   showToast(id ? "Course mise à jour" : "Course ajoutée 🏁");
+  const newly = detectNewBadges(beforeBadges);
+  if (newly.length) showBadgeUnlockPopup(newly);
 }
 
 /* ================= MODALS: CHALLENGE ================= */
@@ -2170,6 +2560,19 @@ function handleGlobalClick(e) {
     case "delete-course": if (confirm("Supprimer cette course ?")) { deleteCourse(id); closeModal(); render(); showToast("Course supprimée"); } break;
     case "view-photo": openPhotoLightbox(t.dataset.src); break;
     case "remove-photo": pendingCoursePhotos.splice(Number(t.dataset.index), 1); refreshPhotoGallery(); break;
+    case "add-roadmap": openRoadmapModal(); break;
+    case "edit-roadmap": { const r = getRoadmap(id); if (r) openRoadmapModal(r); break; }
+    case "delete-roadmap": if (confirm("Supprimer ce « Road to... » et tout son journal de bord ?")) { deleteRoadmap(id); if (state.roadmapDetailId === id) state.roadmapDetailId = null; closeModal(); render(); showToast("Objectif supprimé"); } break;
+    case "open-roadmap": openRoadmapDetailModal(id); break;
+    case "toggle-roadmap-dossard": { const r = getRoadmap(id); if (r) { updateRoadmap(id, { dossard: !r.dossard }); render(); if (state.roadmapDetailId === id) openRoadmapDetailModal(id); } break; }
+    case "add-roadmap-step": openRoadmapStepModal(id); break;
+    case "edit-roadmap-step": openRoadmapStepModal(t.dataset.roadmapId, t.dataset.stepId); break;
+    case "delete-roadmap-step": if (confirm("Supprimer cette étape ?")) { const rid = t.dataset.roadmapId; deleteRoadmapStep(rid, t.dataset.stepId); closeModal(); render(); openRoadmapDetailModal(rid); showToast("Étape supprimée"); } break;
+    case "toggle-step-done": { const r = getRoadmap(t.dataset.roadmapId); const s = r && r.steps.find(x => x.id === t.dataset.stepId); if (r && s) { updateRoadmapStep(r.id, s.id, { done: !s.done }); render(); openRoadmapDetailModal(r.id); } break; }
+    case "toggle-step-dossard": { const r = getRoadmap(t.dataset.roadmapId); const s = r && r.steps.find(x => x.id === t.dataset.stepId); if (r && s) { updateRoadmapStep(r.id, s.id, { dossard: !s.dossard }); render(); openRoadmapDetailModal(r.id); } break; }
+    case "add-journal-entry": openJournalEntryModal(id, t.dataset.category); break;
+    case "delete-journal-entry": if (confirm("Supprimer cette entrée du journal ?")) { const rid = t.dataset.roadmapId; deleteJournalEntry(rid, t.dataset.entryId); render(); openRoadmapDetailModal(rid); showToast("Entrée supprimée"); } break;
+    case "remove-journal-photo": pendingJournalPhotos.splice(Number(t.dataset.index), 1); refreshJournalPhotoGallery(); break;
     case "add-challenge": openChallengeModal(); break;
     case "edit-challenge": { const ch = DATA.challenges.find(x => x.id === id); if (ch) openChallengeModal(ch); break; }
     case "delete-challenge": if (confirm("Supprimer ce challenge et toute sa liste ?")) { deleteChallenge(id); closeModal(); render(); showToast("Challenge supprimé"); } break;
@@ -2214,6 +2617,7 @@ function handleGlobalClick(e) {
       t.classList.add("active");
       if (t.dataset.target === "pill-sport-value") updateActivityFormFields();
       if (t.dataset.target === "pill-coursestatus-value") updateCourseFormFields();
+      if (t.dataset.target === "pill-roadmapgoal-value") updateRoadmapFormFields();
       break;
     }
   }
@@ -2234,6 +2638,9 @@ function handleGlobalSubmit(e) {
   if (e.target.id === "form-weight") { e.preventDefault(); saveWeightForm(e.target); }
   if (e.target.id === "form-measurement") { e.preventDefault(); saveMeasurementForm(e.target); }
   if (e.target.id === "form-course") { e.preventDefault(); saveCourseForm(e.target); }
+  if (e.target.id === "form-roadmap") { e.preventDefault(); saveRoadmapForm(e.target); }
+  if (e.target.id === "form-roadmap-step") { e.preventDefault(); saveRoadmapStepForm(e.target); }
+  if (e.target.id === "form-journal-entry") { e.preventDefault(); saveJournalEntryForm(e.target); }
   if (e.target.id === "form-challenge") { e.preventDefault(); saveChallengeForm(e.target); }
   if (e.target.id === "form-challenge-additem") {
     e.preventDefault();
@@ -2280,6 +2687,14 @@ function handleGlobalChange(e) {
     Promise.all(files.map(f => compressImageFile(f, 1000, 0.7).catch(() => null))).then(dataUrls => {
       pendingCoursePhotos.push(...dataUrls.filter(Boolean));
       refreshPhotoGallery();
+    });
+  }
+  if (e.target.id === "journalPhotoInput") {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    Promise.all(files.map(f => compressImageFile(f, 1000, 0.7).catch(() => null))).then(dataUrls => {
+      pendingJournalPhotos.push(...dataUrls.filter(Boolean));
+      refreshJournalPhotoGallery();
     });
   }
   if (e.target.id === "weightPhotoInputHidden") {

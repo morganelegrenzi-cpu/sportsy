@@ -630,6 +630,25 @@ a.link { color: var(--orange); text-decoration: none; font-weight: 700; }
 }
 .photo-lightbox img { max-width: 92%; max-height: 85vh; border-radius: 8px; }
 
+/* ROAD TO... */
+.roadmap-mini-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.badge.badge-green { background: #d3f2da; color: var(--green); }
+.journal-entry-card { margin-bottom: 8px; }
+
+/* Badge unlock popup */
+.badge-unlock-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--orange-light);
+  margin-bottom: 8px;
+}
+.badge-unlock-item .ic { font-size: 30px; line-height: 1; }
+.badge-unlock-item .txt .title { font-weight: 700; font-size: 13px; color: var(--text); }
+.badge-unlock-item .txt .lbl { font-size: 12px; color: var(--orange-dark); font-weight: 600; }
+
 .challenge-progress-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
 .challenge-item-row {
   display: flex;
