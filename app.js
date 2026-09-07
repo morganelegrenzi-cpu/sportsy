@@ -1738,16 +1738,25 @@ function adventureTotalObjectsUnlocked(ctx) {
   return ctx.islands.reduce((t, i) => t + i.unlockedObjectsCount, 0);
 }
 function ensureActiveIsland(mapDef) {
-  DATA.adventure = DATA.adventure || { activeIslandId: null, progressKm: {} };
+  DATA.adventure = DATA.adventure || { activeIslandId: null, progressKm: {}, unlockBaselineKm: null };
   DATA.adventure.progressKm = DATA.adventure.progressKm || {};
+  let needsPersist = false;
+  if (DATA.adventure.unlockBaselineKm === null || DATA.adventure.unlockBaselineKm === undefined) {
+    // Première utilisation de la carte : on fige la distance déjà courue jusqu'ici comme point de départ,
+    // pour que l'historique déjà accumulé ne débloque pas instantanément toutes les îles.
+    DATA.adventure.unlockBaselineKm = DATA.activities.filter(a => RUNNING_COMBO_SPORTS.includes(a.sport)).reduce((t, a) => t + distanceKm(a), 0);
+    needsPersist = true;
+  }
+  if (needsPersist) persist();
   if (!DATA.adventure.activeIslandId) {
     setActiveIsland((mapDef || ADVENTURE_MAPS[0]).islands[0].id);
   }
 }
 function computeAdventureContext(mapDef) {
   ensureActiveIsland(mapDef);
-  // La distance totale (toutes îles confondues) ne sert qu'à révéler progressivement les îles sur la carte.
-  const lifetimeKm = DATA.activities.filter(a => RUNNING_COMBO_SPORTS.includes(a.sport)).reduce((t, a) => t + distanceKm(a), 0);
+  // La distance qui débloque les îles démarre à 0 le jour où la carte a été découverte : on retire le point de départ figé de la distance totale.
+  const rawLifetimeKm = DATA.activities.filter(a => RUNNING_COMBO_SPORTS.includes(a.sport)).reduce((t, a) => t + distanceKm(a), 0);
+  const lifetimeKm = Math.max(0, rawLifetimeKm - (DATA.adventure.unlockBaselineKm || 0));
   const activeIslandId = DATA.adventure.activeIslandId;
   const islands = mapDef.islands.map((isl, i) => {
     const unlockAt = i === 0 ? 0 : mapDef.islands[i - 1].length;

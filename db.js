@@ -32,7 +32,7 @@ const DEFAULT_DATA = {
   weightLogs: [],   // {id, date:"YYYY-MM-DD", weight(kg), duringPeriod:bool, photos:[dataURL], note}
   measurements: [], // {id, date:"YYYY-MM-DD", waist, hips, glutes, thighs, notes} — saisie libre, sans rythme imposé
   roadmaps: [],     // {id, name, targetRace:{name,date,dossard,goalType:'finisher'|'temps',goalTime}, steps:[{id,name,date,dossard,done}], journal:[{id,date,category,text,test,resultat,verdict,photos:[dataURL]}]}
-  adventure: { activeIslandId: null, progressKm: {} }, // jeu "Îles d'aventure" : île active choisie + km alloués par île (uniquement quand elle était active)
+  adventure: { activeIslandId: null, progressKm: {}, unlockBaselineKm: null }, // jeu "Îles d'aventure" : île active choisie + km alloués par île (uniquement quand elle était active) + point de départ (km déjà courus avant de découvrir la carte, pour ne pas débloquer les îles avec l'historique)
   settings: { name: "" }
 };
 
