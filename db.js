@@ -32,6 +32,7 @@ const DEFAULT_DATA = {
   weightLogs: [],   // {id, date:"YYYY-MM-DD", weight(kg), duringPeriod:bool, photos:[dataURL], note}
   measurements: [], // {id, date:"YYYY-MM-DD", waist, hips, glutes, thighs, notes} — saisie libre, sans rythme imposé
   roadmaps: [],     // {id, name, targetRace:{name,date,dossard,goalType:'finisher'|'temps',goalTime}, steps:[{id,name,date,dossard,done}], journal:[{id,date,category,text,test,resultat,verdict,photos:[dataURL]}]}
+  adventure: { activeIslandId: null, progressKm: {} }, // jeu "Îles d'aventure" : île active choisie + km alloués par île (uniquement quand elle était active)
   settings: { name: "" }
 };
 
@@ -42,6 +43,7 @@ function loadData() {
     const parsed = JSON.parse(raw);
     const data = Object.assign(structuredCloneSafe(DEFAULT_DATA), parsed);
     migrateOldRaces(data);
+    fixInvalidGoalMetrics(data);
     return data;
   } catch (e) {
     console.error("Erreur de lecture des données", e);
@@ -73,6 +75,23 @@ function migrateOldRaces(data) {
   });
   data.races = [];
   saveData(data);
+}
+
+/* Corrige les objectifs enregistrés en "distance (km)" pour un sport qui ne suit pas de distance
+   (ex : Muscu / Renfo) — ces objectifs sont convertis en "nombre de séances", seule mesure pertinente. */
+function fixInvalidGoalMetrics(data) {
+  if (!data.goals || !data.goals.length) return;
+  const allSports = SPORTS.concat(data.customSports || []);
+  let changed = false;
+  data.goals.forEach(g => {
+    if (!g.sport) return;
+    const sp = allSports.find(s => s.id === g.sport);
+    if (sp && sp.distance === false && g.metric === "distance") {
+      g.metric = "sessions";
+      changed = true;
+    }
+  });
+  if (changed) saveData(data);
 }
 
 function structuredCloneSafe(obj) {
@@ -414,6 +433,20 @@ function deleteJournalEntry(roadmapId, entryId) {
   const r = getRoadmap(roadmapId);
   if (!r) return;
   r.journal = r.journal.filter(x => x.id !== entryId);
+  persist();
+}
+
+/* ---------- Îles d'aventure ---------- */
+function setActiveIsland(islandId) {
+  DATA.adventure = DATA.adventure || { activeIslandId: null, progressKm: {} };
+  DATA.adventure.activeIslandId = islandId;
+  persist();
+}
+function addAdventureProgress(islandId, km) {
+  if (!islandId || !km || km <= 0) return;
+  DATA.adventure = DATA.adventure || { activeIslandId: null, progressKm: {} };
+  DATA.adventure.progressKm = DATA.adventure.progressKm || {};
+  DATA.adventure.progressKm[islandId] = (DATA.adventure.progressKm[islandId] || 0) + km;
   persist();
 }
 

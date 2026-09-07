@@ -16,7 +16,8 @@ const state = {
   calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   entrainementView: "list",
   entrainementProgramId: null,
-  roadmapDetailId: null
+  roadmapDetailId: null,
+  adventureIslandId: null
 };
 const charts = {};
 
@@ -229,13 +230,14 @@ function registerSW() {
 /* ---------------- RENDER ROOT ---------------- */
 function render() {
   const main = document.getElementById("main");
-  const titles = { accueil: "Mon Suivi Sport", stats: "Statistiques", objectifs: "Objectifs", courses: "Courses", entrainement: "Renfo", bilans: "Bilans", profil: "Profil" };
+  const titles = { accueil: "Mon Suivi Sport", stats: "Statistiques", objectifs: "Objectifs", courses: "Courses", aventure: "Îles d'aventure", entrainement: "Renfo", bilans: "Bilans", profil: "Profil" };
   document.getElementById("topbarTitle").textContent = titles[state.page] || "Mon Suivi Sport";
   let html = "";
   if (state.page === "accueil") html = renderAccueil();
   else if (state.page === "stats") html = renderStats();
   else if (state.page === "objectifs") html = renderObjectifs();
   else if (state.page === "courses") html = renderCourses();
+  else if (state.page === "aventure") html = renderAventure();
   else if (state.page === "entrainement") html = renderEntrainement();
   else if (state.page === "bilans") html = renderBilans();
   else if (state.page === "profil") html = renderProfil();
@@ -249,6 +251,7 @@ function afterRender() {
   if (state.page === "bilans" && state.bilanTab === "annuel") mountBilanYearChart();
   if (state.page === "bilans" && state.bilanTab === "mensuel") mountBilanMonthChart();
   if (state.page === "objectifs" && state.objTab === "steps") mountStepsChart();
+  if (state.page === "aventure") mountAdventureIslandPath();
 }
 
 /* ================= ACCUEIL ================= */
@@ -688,6 +691,7 @@ function renderBilanMensuel() {
       ${statBox("Temps", fmtDuration(tot.duration))}
     </div>
   </div>
+  <button class="btn btn-primary btn-block" data-action="open-monthly-recap" data-year="${y}" data-month="${m}" style="margin-top:2px;margin-bottom:14px;">🎥 Récap vidéo du mois</button>
   <div class="section-title">Par sport</div>
   <div class="card">${rows || `<div class="empty-state">Aucune activité ce mois-ci.</div>`}</div>
 
@@ -812,6 +816,217 @@ function mountBilanMonthChart() {
     data.push(Math.round(totalsAll(dayActs).distance * 10) / 10);
   }
   renderBarChart("chart-bilan-month", labels, [{ label: "km", data, color: "#FC4C02" }]);
+}
+
+/* ================= RÉCAP VIDÉO MENSUEL ================= */
+let recapState = null;
+function computeMonthlyRecapSlides(y, m) {
+  const mk = `${y}-${pad2(m)}`;
+  const start = new Date(y, m - 1, 1), end = new Date(y, m, 0);
+  const prevStart = new Date(y, m - 2, 1), prevEnd = new Date(y, m - 1, 0);
+  const acts = activitiesInRange(null, start, end);
+  const prevActs = activitiesInRange(null, prevStart, prevEnd);
+  const tot = totalsAll(acts);
+  const prevTot = totalsAll(prevActs);
+  if (!tot.sessions) return null;
+  const bySport = aggregateBySport(acts);
+  const workoutsThisMonth = getWorkoutLogs().filter(w => w.date.slice(0, 7) === mk);
+  const stepsThisMonth = DATA.steps.filter(s => s.date.slice(0, 7) === mk);
+  const stepGoalMetDays = stepsThisMonth.filter(s => { const g = getStepGoalForDate(s.date); return g != null && s.count >= g; }).length;
+  const avgSteps = stepsThisMonth.length ? Math.round(stepsThisMonth.reduce((t, s) => t + s.count, 0) / stepsThisMonth.length) : 0;
+  const topSport = getAllSports().filter(s => bySport[s.id] && bySport[s.id].sessions > 0).sort((a, b) => bySport[b.id].sessions - bySport[a.id].sessions)[0];
+  const longestAct = acts.filter(a => distanceKm(a) > 0).sort((a, b) => distanceKm(b) - distanceKm(a))[0];
+
+  const slides = [];
+  slides.push({ icon: "🎬", title: "Ton récap du mois", big: `${MOIS[m - 1]} ${y}`, sub: `${tot.sessions} séance${tot.sessions > 1 ? "s" : ""} au total`, color: ["#FC4C02", "#ff8a50"] });
+  if (tot.distance > 0) {
+    const diff = prevTot.distance > 0 ? Math.round(((tot.distance - prevTot.distance) / prevTot.distance) * 100) : null;
+    slides.push({ icon: "📏", title: "Distance parcourue", big: fmtKm(tot.distance), sub: diff !== null ? `${diff >= 0 ? "+" : ""}${diff}% vs le mois dernier` : "", color: ["#1c7ed6", "#4dabf7"] });
+  }
+  if (tot.elevation > 0) {
+    slides.push({ icon: "⛰️", title: "Dénivelé cumulé", big: fmtElevation(tot.elevation), sub: "", color: ["#8b5e34", "#c08552"] });
+  }
+  slides.push({ icon: "⏱️", title: "Temps total", big: fmtDuration(tot.duration), sub: "", color: ["#2f9e44", "#69db7c"] });
+  if (topSport) {
+    slides.push({ icon: topSport.icon, title: "Sport favori du mois", big: topSport.name, sub: `${bySport[topSport.id].sessions} séance${bySport[topSport.id].sessions > 1 ? "s" : ""}`, color: ["#e03131", "#ff8787"] });
+  }
+  if (longestAct) {
+    const sp = getSport(longestAct.sport);
+    slides.push({ icon: "🏆", title: "Meilleure sortie", big: fmtKm(distanceKm(longestAct)), sub: `${sp ? sp.name : ""} · ${fmtDateShort(longestAct.date)}`, color: ["#f08c00", "#ffd43b"] });
+  }
+  if (workoutsThisMonth.length > 0) {
+    slides.push({ icon: "🏋️", title: "Renfo", big: `${workoutsThisMonth.length}`, sub: workoutsThisMonth.length > 1 ? "séances de renfo" : "séance de renfo", color: ["#495057", "#868e96"] });
+  }
+  if (stepsThisMonth.length > 0) {
+    slides.push({ icon: "👣", title: "Pas quotidiens", big: fmtNum(avgSteps), sub: `en moyenne / jour · objectif atteint ${stepGoalMetDays}/${stepsThisMonth.length} jours`, color: ["#7048e8", "#9775fa"] });
+  }
+  slides.push({ icon: "🎉", title: "Bravo !", big: `${tot.sessions} séance${tot.sessions > 1 ? "s" : ""}`, sub: `en ${MOIS[m - 1]} — continue comme ça 💪`, color: ["#FC4C02", "#d94202"] });
+  return slides;
+}
+function openMonthlyRecapStory(y, m) {
+  const slides = computeMonthlyRecapSlides(y, m);
+  if (!slides) { showToast("Pas encore assez d'activités ce mois-ci pour un récap 🙂"); return; }
+  recapState = { slides, index: 0, timer: null, y, m };
+  renderRecapStory();
+}
+function renderRecapStory() {
+  if (!recapState) return;
+  const { slides, index } = recapState;
+  const s = slides[index];
+  const bars = slides.map((_, i) => `<div class="recap-bar"><div class="recap-bar-fill ${i < index ? "full" : i === index ? "active" : ""}"></div></div>`).join("");
+  const html = `
+  <div class="recap-overlay" style="background:linear-gradient(160deg, ${s.color[0]}, ${s.color[1]});">
+    <div class="recap-bars">${bars}</div>
+    <button class="recap-close" data-action="recap-close">✕</button>
+    <div class="recap-tapzone left" data-action="recap-prev"></div>
+    <div class="recap-tapzone right" data-action="recap-next"></div>
+    <div class="recap-content">
+      <div class="recap-icon">${s.icon}</div>
+      <div class="recap-title">${s.title}</div>
+      <div class="recap-big">${s.big}</div>
+      ${s.sub ? `<div class="recap-sub">${s.sub}</div>` : ""}
+    </div>
+    <div class="recap-footer">
+      <button type="button" class="btn btn-block recap-download-btn" data-action="recap-download">🎥 Télécharger la vidéo</button>
+    </div>
+  </div>`;
+  document.getElementById("modalRoot").innerHTML = html;
+  startRecapTimer();
+}
+function startRecapTimer() {
+  if (!recapState) return;
+  clearTimeout(recapState.timer);
+  recapState.timer = setTimeout(() => recapNext(), 3500);
+}
+function recapNext() {
+  if (!recapState) return;
+  if (recapState.index < recapState.slides.length - 1) { recapState.index++; renderRecapStory(); }
+  else closeRecapStory();
+}
+function recapPrev() {
+  if (!recapState) return;
+  if (recapState.index > 0) { recapState.index--; renderRecapStory(); }
+}
+function closeRecapStory() {
+  if (recapState) clearTimeout(recapState.timer);
+  recapState = null;
+  document.getElementById("modalRoot").innerHTML = "";
+}
+function recapDownload() {
+  if (!recapState) return;
+  const btn = document.querySelector(".recap-download-btn");
+  if (btn && btn.disabled) return;
+  clearTimeout(recapState.timer);
+  const slides = recapState.slides;
+  const monthLabel = (MOIS[recapState.m - 1] || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const filenameBase = `sportsy-recap-${monthLabel}-${recapState.y}`;
+  if (btn) { btn.disabled = true; btn.textContent = "🎬 Génération en cours..."; }
+  renderVideoRecap(slides, filenameBase)
+    .then(() => showToast("Vidéo téléchargée 🎉"))
+    .catch(err => {
+      console.error(err);
+      showToast("Export vidéo indisponible sur cet appareil — tu peux filmer l'écran en attendant 🙂");
+    })
+    .finally(() => {
+      if (btn) { btn.disabled = false; btn.textContent = "🎥 Télécharger la vidéo"; }
+      if (recapState) startRecapTimer();
+    });
+}
+function drawRecapFrame(ctx, s, w, h, t) {
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, s.color[0]);
+  grad.addColorStop(1, s.color[1]);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+  const introProgress = Math.min(1, t / 0.15);
+  const alpha = introProgress;
+  const scale = 0.85 + 0.15 * introProgress;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(scale, scale);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `${Math.round(h * 0.13)}px sans-serif`;
+  ctx.fillText(s.icon, 0, -h * 0.16);
+  ctx.font = `700 ${Math.round(h * 0.04)}px -apple-system, sans-serif`;
+  ctx.fillText(s.title, 0, -h * 0.02);
+  ctx.font = `800 ${Math.round(h * 0.09)}px -apple-system, sans-serif`;
+  wrapCanvasText(ctx, s.big, 0, h * 0.08, w * 0.85, Math.round(h * 0.1));
+  if (s.sub) {
+    ctx.font = `500 ${Math.round(h * 0.032)}px -apple-system, sans-serif`;
+    ctx.globalAlpha = alpha * 0.9;
+    wrapCanvasText(ctx, s.sub, 0, h * 0.2, w * 0.8, Math.round(h * 0.04));
+  }
+  ctx.restore();
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `600 ${Math.round(h * 0.022)}px -apple-system, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("🏃 Sportsy", w / 2, h - h * 0.04);
+  ctx.globalAlpha = 1;
+}
+function wrapCanvasText(ctx, text, cx, cy, maxWidth, lineHeight) {
+  const words = String(text).split(" ");
+  const lines = [];
+  let line = "";
+  words.forEach(word => {
+    const test = line ? line + " " + word : word;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = test;
+  });
+  if (line) lines.push(line);
+  const startY = cy - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
+}
+function renderVideoRecap(slides, filenameBase) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) { reject(new Error("MediaRecorder non supporté")); return; }
+      const W = 720, H = 1280;
+      const canvas = document.createElement("canvas");
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext("2d");
+      const mimeCandidates = ["video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+      const mimeType = mimeCandidates.find(mt => MediaRecorder.isTypeSupported(mt));
+      if (!mimeType) { reject(new Error("Aucun format vidéo supporté")); return; }
+      const stream = canvas.captureStream(30);
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4000000 });
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
+        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+        downloadBlob(`${filenameBase}.${ext}`, blob);
+        resolve();
+      };
+      recorder.onerror = e => reject((e && e.error) || new Error("Erreur d'enregistrement"));
+      const slideDurationMs = 3000;
+      const totalMs = slides.length * slideDurationMs;
+      recorder.start();
+      const startTime = performance.now();
+      function frame(now) {
+        const elapsed = now - startTime;
+        if (elapsed >= totalMs) {
+          drawRecapFrame(ctx, slides[slides.length - 1], W, H, 1);
+          recorder.stop();
+          return;
+        }
+        const idx = Math.min(slides.length - 1, Math.floor(elapsed / slideDurationMs));
+        const within = (elapsed - idx * slideDurationMs) / slideDurationMs;
+        drawRecapFrame(ctx, slides[idx], W, H, within);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    } catch (err) { reject(err); }
+  });
+}
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 /* ================= COURSES ================= */
@@ -1410,29 +1625,294 @@ function detectNewBadges(before) {
   });
   return newly;
 }
+function badgeItemsFromNewly(newly) {
+  return (newly || []).map(({ group: g, tier: t }) => ({
+    icon: g.tierIcon ? g.tierIcon(t) : g.icon,
+    title: g.title,
+    sub: g.chipLabel ? g.chipLabel(t) : g.fmtTarget(t)
+  }));
+}
 function showBadgeUnlockPopup(newly) {
-  if (!newly || !newly.length) return;
-  const items = newly.map(({ group: g, tier: t }) => {
-    const icon = g.tierIcon ? g.tierIcon(t) : g.icon;
-    const label = g.chipLabel ? g.chipLabel(t) : g.fmtTarget(t);
-    return `<div class="badge-unlock-item">
-      <div class="ic">${icon}</div>
-      <div class="txt"><div class="title">${g.title}</div><div class="lbl">${label}</div></div>
-    </div>`;
-  }).join("");
-  const html = `
+  showCelebrationPopup(badgeItemsFromNewly(newly));
+}
+function showCelebrationPopup(items) {
+  if (!items || !items.length) return;
+  const html = items.map(it => `<div class="badge-unlock-item">
+      <div class="ic">${it.icon}</div>
+      <div class="txt"><div class="title">${it.title}</div><div class="lbl">${it.sub}</div></div>
+    </div>`).join("");
+  const modal = `
   <div class="modal-overlay">
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <div style="text-align:center;padding:6px 0 4px;">
         <div style="font-size:44px;">🎉</div>
-        <h2 style="margin:6px 0 2px;">${newly.length > 1 ? "Nouveaux badges débloqués !" : "Nouveau badge débloqué !"}</h2>
+        <h2 style="margin:6px 0 2px;">${items.length > 1 ? "Nouveaux déblocages !" : "Nouveau déblocage !"}</h2>
       </div>
-      ${items}
+      ${html}
       <button class="btn btn-primary btn-block" data-action="close-modal" style="margin-top:14px;">Continuer 🙌</button>
     </div>
   </div>`;
-  mountModal(html);
+  mountModal(modal);
+}
+
+/* ================= ÎLES D'AVENTURE ================= */
+const ADVENTURE_ISLANDS = [
+  { id: "debutant", name: "Île du Débutant", icon: "🏝️", length: 10, colors: ["#40c057", "#8ce99a"],
+    objects: [
+      { icon: "🐚", at: 2, name: "Coquillage" },
+      { icon: "🌴", at: 4, name: "Palmier" },
+      { icon: "⛲", at: 6, name: "Fontaine" },
+      { icon: "🦜", at: 8, name: "Perroquet" },
+      { icon: "🏆", at: 10, name: "Trésor caché" }
+    ] },
+  { id: "foret", name: "Île de la Forêt", icon: "🌲", length: 20, colors: ["#2f9e44", "#69db7c"],
+    objects: [
+      { icon: "🍄", at: 4, name: "Champignon" },
+      { icon: "🦌", at: 8, name: "Cerf" },
+      { icon: "🏕️", at: 12, name: "Campement" },
+      { icon: "🦉", at: 16, name: "Chouette" },
+      { icon: "🗿", at: 20, name: "Statue ancienne" }
+    ] },
+  { id: "volcan", name: "Île Volcanique", icon: "🌋", length: 35, colors: ["#e8590c", "#ffa94d"],
+    objects: [
+      { icon: "🔥", at: 7, name: "Flamme éternelle" },
+      { icon: "🪨", at: 14, name: "Roche noire" },
+      { icon: "🦎", at: 21, name: "Salamandre" },
+      { icon: "💎", at: 28, name: "Cristal" },
+      { icon: "👑", at: 35, name: "Couronne du volcan" }
+    ] },
+  { id: "glace", name: "Île Glacée", icon: "🏔️", length: 50, colors: ["#1c7ed6", "#99e9f2"],
+    objects: [
+      { icon: "❄️", at: 10, name: "Flocon" },
+      { icon: "🐧", at: 20, name: "Manchot" },
+      { icon: "⛄", at: 30, name: "Bonhomme de neige" },
+      { icon: "🧊", at: 40, name: "Glacier" },
+      { icon: "🌟", at: 50, name: "Étoile polaire" }
+    ] },
+  { id: "mystere", name: "Île Mystérieuse", icon: "🌫️", length: 75, colors: ["#5f3dc4", "#b197fc"],
+    objects: [
+      { icon: "🔮", at: 15, name: "Boule de cristal" },
+      { icon: "🦇", at: 30, name: "Chauve-souris" },
+      { icon: "🕯️", at: 45, name: "Bougie" },
+      { icon: "🗝️", at: 60, name: "Clé mystérieuse" },
+      { icon: "👻", at: 75, name: "Esprit gardien" }
+    ] },
+  { id: "legende", name: "Île Légendaire", icon: "🐉", length: 120, colors: ["#c92a2a", "#ffa8a8"],
+    objects: [
+      { icon: "🥚", at: 24, name: "Œuf de dragon" },
+      { icon: "🔥", at: 48, name: "Souffle ardent" },
+      { icon: "⚔️", at: 72, name: "Épée ancienne" },
+      { icon: "🛡️", at: 96, name: "Bouclier" },
+      { icon: "🐉", at: 120, name: "Dragon légendaire" }
+    ] }
+];
+const ADVENTURE_MAPS = [
+  {
+    id: "archipel1",
+    name: "Archipel de départ",
+    islands: ADVENTURE_ISLANDS,
+    quests: [
+      { id: "q-premiers-pas", icon: "🚩", title: "Premiers pas", desc: "Termine un parcours pour la première fois, sur n'importe quelle île.",
+        check: ctx => ctx.islands.some(i => i.laps >= 1),
+        progress: ctx => ctx.islands.some(i => i.laps >= 1) ? "1/1" : "0/1" },
+      { id: "q-exploratrice", icon: "🔍", title: "Exploratrice", desc: "Débloque 10 objets au total sur la carte.",
+        check: ctx => adventureTotalObjectsUnlocked(ctx) >= 10,
+        progress: ctx => `${Math.min(adventureTotalObjectsUnlocked(ctx), 10)}/10` },
+      { id: "q-cartographe", icon: "🗺️", title: "Cartographe", desc: "Débloque toutes les îles de la carte.",
+        check: ctx => ctx.islands.every(i => i.unlocked),
+        progress: ctx => `${ctx.islands.filter(i => i.unlocked).length}/${ctx.islands.length}` },
+      { id: "q-habituee", icon: "🔁", title: "Habituée des lieux", desc: `Fais le tour de ${ADVENTURE_ISLANDS[0].name} 5 fois.`,
+        check: ctx => ctx.islands[0].laps >= 5,
+        progress: ctx => `${Math.min(ctx.islands[0].laps, 5)}/5` },
+      { id: "q-baroudeuse", icon: "🧭", title: "Baroudeuse", desc: "Termine un parcours sur au moins 3 îles différentes.",
+        check: ctx => ctx.islands.filter(i => i.laps >= 1).length >= 3,
+        progress: ctx => `${ctx.islands.filter(i => i.laps >= 1).length}/3` },
+      { id: "q-legende", icon: "🐉", title: "Légende vivante", desc: "Débloque le trésor final de l'île la plus difficile.",
+        check: ctx => { const last = ctx.islands[ctx.islands.length - 1]; return last.unlocked && last.objectsStatus[last.objectsStatus.length - 1].unlocked; },
+        progress: ctx => { const last = ctx.islands[ctx.islands.length - 1]; return last.objectsStatus[last.objectsStatus.length - 1].unlocked ? "Fait ✅" : `${last.unlockedObjectsCount}/${last.totalObjects}`; } }
+    ]
+  }
+];
+function adventureTotalObjectsUnlocked(ctx) {
+  return ctx.islands.reduce((t, i) => t + i.unlockedObjectsCount, 0);
+}
+function ensureActiveIsland(mapDef) {
+  DATA.adventure = DATA.adventure || { activeIslandId: null, progressKm: {} };
+  DATA.adventure.progressKm = DATA.adventure.progressKm || {};
+  if (!DATA.adventure.activeIslandId) {
+    setActiveIsland((mapDef || ADVENTURE_MAPS[0]).islands[0].id);
+  }
+}
+function computeAdventureContext(mapDef) {
+  ensureActiveIsland(mapDef);
+  // La distance totale (toutes îles confondues) ne sert qu'à révéler progressivement les îles sur la carte.
+  const lifetimeKm = DATA.activities.filter(a => RUNNING_COMBO_SPORTS.includes(a.sport)).reduce((t, a) => t + distanceKm(a), 0);
+  const activeIslandId = DATA.adventure.activeIslandId;
+  const islands = mapDef.islands.map((isl, i) => {
+    const unlockAt = i === 0 ? 0 : mapDef.islands[i - 1].length;
+    const unlocked = lifetimeKm >= unlockAt;
+    // La progression sur LE parcours (tours, objets) ne bouge que quand cette île était l'île active au moment des sorties.
+    const allocatedKm = (DATA.adventure.progressKm && DATA.adventure.progressKm[isl.id]) || 0;
+    const laps = unlocked ? Math.floor(allocatedKm / isl.length) : 0;
+    const posInLap = unlocked ? allocatedKm % isl.length : 0;
+    const objectsStatus = isl.objects.map(o => ({ ...o, unlocked: unlocked && (laps >= 1 || posInLap >= o.at) }));
+    const unlockedObjectsCount = objectsStatus.filter(o => o.unlocked).length;
+    return Object.assign({}, isl, {
+      unlockAt, unlocked, laps, posInLap, allocatedKm,
+      isActive: isl.id === activeIslandId,
+      percentInLap: unlocked ? Math.min(100, Math.round((posInLap / isl.length) * 100)) : 0,
+      objectsStatus, unlockedObjectsCount, totalObjects: isl.objects.length
+    });
+  });
+  return { lifetimeKm, activeIslandId, islands };
+}
+function snapshotAdventureState() {
+  const ctx = computeAdventureContext(ADVENTURE_MAPS[0]);
+  const unlockedIslandIds = ctx.islands.filter(i => i.unlocked).map(i => i.id);
+  const unlockedObjectKeys = [];
+  ctx.islands.forEach(i => i.objectsStatus.forEach(o => { if (o.unlocked) unlockedObjectKeys.push(i.id + "|" + o.at); }));
+  const completedQuestIds = ADVENTURE_MAPS[0].quests.filter(q => q.check(ctx)).map(q => q.id);
+  return { unlockedIslandIds, unlockedObjectKeys, completedQuestIds };
+}
+function detectAdventureNews(before) {
+  const map = ADVENTURE_MAPS[0];
+  const ctx = computeAdventureContext(map);
+  const items = [];
+  ctx.islands.forEach(isl => {
+    if (isl.unlocked && !before.unlockedIslandIds.includes(isl.id)) {
+      items.push({ icon: isl.icon, title: "Nouvelle île débloquée !", sub: isl.name });
+    }
+    isl.objectsStatus.forEach(o => {
+      const key = isl.id + "|" + o.at;
+      if (o.unlocked && !before.unlockedObjectKeys.includes(key)) {
+        items.push({ icon: o.icon, title: "Objet découvert !", sub: `${o.name} · ${isl.name}` });
+      }
+    });
+  });
+  map.quests.forEach(q => {
+    if (q.check(ctx) && !before.completedQuestIds.includes(q.id)) {
+      items.push({ icon: q.icon, title: "Quête accomplie !", sub: q.title });
+    }
+  });
+  return items;
+}
+function renderAventure() {
+  const map = ADVENTURE_MAPS[0];
+  const ctx = computeAdventureContext(map);
+  if (!state.adventureIslandId || !ctx.islands.find(i => i.id === state.adventureIslandId)) {
+    state.adventureIslandId = ctx.activeIslandId;
+  }
+  const selected = ctx.islands.find(i => i.id === state.adventureIslandId) || ctx.islands[0];
+  const activeIsland = ctx.islands.find(i => i.id === ctx.activeIslandId);
+
+  const islandChips = ctx.islands.map(i => `
+    <div class="island-chip ${i.id === selected.id ? "active" : ""} ${i.unlocked ? "" : "locked"}" data-action="select-island" data-id="${i.id}">
+      ${i.isActive ? `<div class="island-chip-pin">🎯</div>` : ""}
+      <div class="island-chip-icon">${i.unlocked ? i.icon : "🔒"}</div>
+      <div class="island-chip-name">${i.name}</div>
+      <div class="island-chip-sub">${i.unlocked ? `Tour ${i.laps + 1}${i.laps > 0 ? ` · ${i.laps} fait${i.laps > 1 ? "s" : ""}` : ""}` : `${fmtKm(Math.max(0, i.unlockAt - ctx.lifetimeKm))} restants`}</div>
+    </div>`).join("");
+
+  const questsDone = map.quests.filter(q => q.check(ctx)).length;
+  const questCards = map.quests.map(q => {
+    const done = q.check(ctx);
+    return `<div class="card quest-card ${done ? "done" : ""}">
+      <div class="goal-head">
+        <div class="name">${q.icon} ${q.title}</div>
+        ${done ? `<span class="badge badge-green">✅ Fait</span>` : ""}
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${q.desc}</div>
+      ${!done ? `<div style="font-size:12px;font-weight:700;color:var(--orange-dark);margin-top:6px;">${q.progress(ctx)}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  return `
+  <div class="card" style="text-align:center;">
+    <div style="font-size:12px;color:var(--text-muted);">Distance cumulée (course + trail) — débloque de nouvelles îles</div>
+    <div style="font-size:28px;font-weight:800;color:var(--orange);">${fmtKm(ctx.lifetimeKm)}</div>
+  </div>
+  <div class="card active-island-banner">
+    <div style="font-size:12px;color:var(--text-muted);">🎯 Île active en ce moment</div>
+    <div style="font-size:16px;font-weight:800;">${activeIsland ? `${activeIsland.icon} ${activeIsland.name}` : "—"}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Tes prochaines sorties course/trail feront avancer cette île.</div>
+  </div>
+  <div class="section-title">${map.name}</div>
+  <div class="island-chip-row">${islandChips}</div>
+
+  ${selected.unlocked ? renderIslandDetail(selected) : renderIslandLocked(selected, ctx.lifetimeKm)}
+
+  <div class="section-title">🧭 Quêtes de la carte (${questsDone}/${map.quests.length})</div>
+  ${questCards}
+  `;
+}
+function renderIslandLocked(isl, lifetimeKm) {
+  const remaining = Math.max(0, isl.unlockAt - lifetimeKm);
+  return `<div class="card" style="text-align:center;padding:30px 16px;">
+    <div style="font-size:40px;">🔒</div>
+    <div style="font-weight:700;margin-top:8px;">${isl.name}</div>
+    <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">Se débloque à ${fmtKm(isl.unlockAt)} cumulés — encore ${fmtKm(remaining)} !</div>
+  </div>`;
+}
+function renderIslandDetail(isl) {
+  const nextObj = isl.objectsStatus.find(o => !o.unlocked);
+  const objectsGrid = isl.objectsStatus.map(o => `
+    <div class="island-object ${o.unlocked ? "unlocked" : ""}">
+      <div class="ic">${o.unlocked ? o.icon : "❔"}</div>
+      <div class="lbl">${o.unlocked ? o.name : "???"}</div>
+    </div>`).join("");
+  return `
+  <div class="card">
+    <div class="island-svg-wrap">
+      <svg viewBox="0 0 320 180" class="island-svg" id="island-svg-${isl.id}">
+        <defs>
+          <linearGradient id="islgrad-${isl.id}" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${isl.colors[0]}"/>
+            <stop offset="100%" stop-color="${isl.colors[1]}"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="160" cy="110" rx="150" ry="60" fill="url(#islgrad-${isl.id})" opacity="0.25"/>
+        <path id="island-path-${isl.id}" d="M25,140 C70,60 110,170 155,95 C200,20 250,150 295,110" fill="none" stroke="rgba(120,90,60,0.55)" stroke-width="4" stroke-dasharray="2 10" stroke-linecap="round"/>
+        <g id="island-objects-${isl.id}"></g>
+        <text id="island-runner-${isl.id}" font-size="22">🏃</text>
+      </svg>
+    </div>
+    <div class="stat-row"><div class="label">Tour en cours</div><div class="value">${fmtKm(isl.posInLap)} / ${fmtKm(isl.length)}</div></div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${isl.percentInLap}%"></div></div>
+    <div class="stat-row"><div class="label">Tours complétés</div><div class="value">${isl.laps}</div></div>
+    ${nextObj ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">Prochain objet à découvrir dans ${fmtKm(Math.max(0, nextObj.at - isl.posInLap))}</div>` : `<div style="font-size:12px;color:var(--green);font-weight:700;margin-top:8px;">🎉 Tous les objets de cette île sont trouvés !</div>`}
+    ${isl.isActive
+      ? `<div class="card" style="background:var(--orange-light);border:none;margin-top:10px;padding:10px 12px;"><div style="font-size:12px;color:var(--orange-dark);font-weight:700;">🎯 C'est ton île active — tes sorties course/trail avancent ici.</div></div>`
+      : `<button class="btn btn-outline btn-block" data-action="set-active-island" data-id="${isl.id}" style="margin-top:10px;">🎯 Choisir cette île comme île active</button>`}
+  </div>
+  <div class="island-objects-grid">${objectsGrid}</div>
+  `;
+}
+function mountAdventureIslandPath() {
+  const map = ADVENTURE_MAPS[0];
+  const ctx = computeAdventureContext(map);
+  const isl = ctx.islands.find(i => i.id === state.adventureIslandId);
+  if (!isl || !isl.unlocked) return;
+  const path = document.getElementById(`island-path-${isl.id}`);
+  if (!path || !path.getTotalLength) return;
+  const totalLength = path.getTotalLength();
+  const objectsG = document.getElementById(`island-objects-${isl.id}`);
+  if (objectsG) {
+    objectsG.innerHTML = isl.objectsStatus.map(o => {
+      const frac = Math.min(1, o.at / isl.length);
+      const pt = path.getPointAtLength(frac * totalLength);
+      const icon = o.unlocked ? o.icon : "🔒";
+      const opacity = o.unlocked ? 1 : 0.55;
+      return `<text x="${pt.x}" y="${pt.y}" font-size="20" text-anchor="middle" opacity="${opacity}">${icon}</text>`;
+    }).join("");
+  }
+  const runner = document.getElementById(`island-runner-${isl.id}`);
+  if (runner) {
+    const runnerFrac = Math.min(1, isl.posInLap / isl.length);
+    const pt = path.getPointAtLength(runnerFrac * totalLength);
+    runner.setAttribute("x", pt.x - 11);
+    runner.setAttribute("y", pt.y + 8);
+  }
 }
 
 /* ================= ENTRAINEMENT (RENFO) ================= */
@@ -2066,12 +2546,21 @@ function saveActivityForm(form) {
   };
   const id = form.dataset.id;
   const beforeBadges = snapshotBadgeState();
-  if (id) updateActivity(id, activity); else addActivity(activity);
+  const beforeAdventure = snapshotAdventureState();
+  if (id) {
+    updateActivity(id, activity);
+  } else {
+    const saved = addActivity(activity);
+    if (RUNNING_COMBO_SPORTS.includes(saved.sport) && distanceKm(saved) > 0) {
+      ensureActiveIsland(ADVENTURE_MAPS[0]);
+      addAdventureProgress(DATA.adventure.activeIslandId, distanceKm(saved));
+    }
+  }
   closeModal();
   render();
   showToast(id ? "Activité mise à jour" : "Activité ajoutée 💪");
-  const newly = detectNewBadges(beforeBadges);
-  if (newly.length) showBadgeUnlockPopup(newly);
+  const items = badgeItemsFromNewly(detectNewBadges(beforeBadges)).concat(detectAdventureNews(beforeAdventure));
+  if (items.length) showCelebrationPopup(items);
 }
 function openActivityDetail(id) {
   const a = DATA.activities.find(x => x.id === id);
@@ -2108,7 +2597,7 @@ function openGoalModal(id) {
           <label>Type d'objectif</label>
           <input type="hidden" id="pill-metric-value" name="metric" value="${g.metric}">
           <div class="pill-select">
-            <div class="pill ${g.metric==='distance'?'active':''}" data-action="pill-choose" data-target="pill-metric-value" data-value="distance">Distance (km)</div>
+            <div class="pill field-metric-distance ${g.metric==='distance'?'active':''}" data-action="pill-choose" data-target="pill-metric-value" data-value="distance">Distance (km)</div>
             <div class="pill ${g.metric==='duration'?'active':''}" data-action="pill-choose" data-target="pill-metric-value" data-value="duration">Temps (h)</div>
             <div class="pill ${g.metric==='sessions'?'active':''}" data-action="pill-choose" data-target="pill-metric-value" data-value="sessions">Nombre de séances</div>
           </div>
@@ -2122,6 +2611,25 @@ function openGoalModal(id) {
     </div>
   </div>`;
   mountModal(html);
+  updateGoalFormFields();
+}
+function updateGoalFormFields() {
+  const form = document.getElementById("form-goal");
+  if (!form) return;
+  const sportVal = document.getElementById("pill-goalsport-value").value;
+  const sp = sportVal && sportVal !== RUNNING_COMBO ? getSport(sportVal) : null;
+  const distanceCapable = !sp || sp.distance !== false;
+  const distancePill = form.querySelector(".field-metric-distance");
+  if (distancePill) distancePill.style.display = distanceCapable ? "" : "none";
+  if (!distanceCapable) {
+    const metricHidden = document.getElementById("pill-metric-value");
+    if (metricHidden.value === "distance") {
+      metricHidden.value = "sessions";
+      Array.from(distancePill.parentElement.children).forEach(p => p.classList.remove("active"));
+      const sessionsPill = form.querySelector('.pill[data-target="pill-metric-value"][data-value="sessions"]');
+      if (sessionsPill) sessionsPill.classList.add("active");
+    }
+  }
 }
 function saveGoalForm(form) {
   const fd = new FormData(form);
@@ -2538,6 +3046,11 @@ function handleGlobalClick(e) {
     case "bilan-next-month": shiftBilanMonth(1); break;
     case "bilan-prev-year": state.bilanYear--; render(); break;
     case "bilan-next-year": state.bilanYear++; render(); break;
+    case "open-monthly-recap": openMonthlyRecapStory(Number(t.dataset.year), Number(t.dataset.month)); break;
+    case "recap-close": closeRecapStory(); break;
+    case "recap-prev": recapPrev(); break;
+    case "recap-next": recapNext(); break;
+    case "recap-download": recapDownload(); break;
     case "obj-tab": state.objTab = t.dataset.tab; render(); break;
     case "add-goal": openGoalModal(); break;
     case "add-step-goal": openStepGoalModal(); break;
@@ -2580,6 +3093,8 @@ function handleGlobalClick(e) {
     case "toggle-challenge-item": toggleChallengeItem(t.dataset.challengeId, t.dataset.itemId); render(); openChallengeDetailModal(t.dataset.challengeId); break;
     case "delete-challenge-item": deleteChallengeItem(t.dataset.challengeId, t.dataset.itemId); render(); openChallengeDetailModal(t.dataset.challengeId); break;
     case "add-sport": openSportModal(); break;
+    case "select-island": state.adventureIslandId = t.dataset.id; render(); break;
+    case "set-active-island": setActiveIsland(id); state.adventureIslandId = id; render(); showToast("Île active mise à jour 🎯"); break;
     case "view-program": state.entrainementView = "detail"; state.entrainementProgramId = id; render(); break;
     case "back-to-programs": state.entrainementView = "list"; state.entrainementProgramId = null; render(); break;
     case "start-workout": startWorkout(id); break;
@@ -2618,6 +3133,7 @@ function handleGlobalClick(e) {
       if (t.dataset.target === "pill-sport-value") updateActivityFormFields();
       if (t.dataset.target === "pill-coursestatus-value") updateCourseFormFields();
       if (t.dataset.target === "pill-roadmapgoal-value") updateRoadmapFormFields();
+      if (t.dataset.target === "pill-goalsport-value") updateGoalFormFields();
       break;
     }
   }

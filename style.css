@@ -99,13 +99,13 @@ main {
   align-items: center;
   gap: 2px;
   padding: 8px 1px 6px;
-  font-size: 9px;
+  font-size: 8px;
   color: var(--text-muted);
   cursor: pointer;
   font-family: inherit;
   white-space: nowrap;
 }
-.navbtn .navicon { font-size: 17px; }
+.navbtn .navicon { font-size: 16px; }
 .navbtn.active { color: var(--orange); font-weight: 700; }
 
 /* CARDS */
@@ -630,10 +630,101 @@ a.link { color: var(--orange); text-decoration: none; font-weight: 700; }
 }
 .photo-lightbox img { max-width: 92%; max-height: 85vh; border-radius: 8px; }
 
+/* RÉCAP VIDÉO MENSUEL */
+.recap-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  overflow: hidden;
+}
+.recap-bars { display: flex; gap: 4px; padding: calc(10px + var(--safe-top)) 10px 0; position: relative; z-index: 3; }
+.recap-bar { flex: 1; height: 3px; background: rgba(255,255,255,0.35); border-radius: 2px; overflow: hidden; }
+.recap-bar-fill { display: block; height: 100%; width: 0%; background: #fff; }
+.recap-bar-fill.full { width: 100%; }
+.recap-bar-fill.active { width: 0%; animation: recapFill 3.5s linear forwards; }
+@keyframes recapFill { from { width: 0%; } to { width: 100%; } }
+.recap-close {
+  position: absolute;
+  top: calc(14px + var(--safe-top));
+  right: 14px;
+  z-index: 5;
+  background: rgba(0,0,0,0.25);
+  color: #fff;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+}
+.recap-tapzone { position: absolute; top: 46px; bottom: 90px; width: 50%; z-index: 2; }
+.recap-tapzone.left { left: 0; }
+.recap-tapzone.right { right: 0; }
+.recap-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  position: relative;
+  z-index: 1;
+  animation: recapFadeIn 0.5s ease;
+}
+.recap-icon { font-size: 56px; margin-bottom: 6px; }
+.recap-title { font-size: 14px; font-weight: 700; opacity: 0.9; text-transform: uppercase; letter-spacing: 0.5px; }
+.recap-big { font-size: 40px; font-weight: 800; margin-top: 10px; line-height: 1.15; }
+.recap-sub { font-size: 14px; margin-top: 12px; opacity: 0.9; }
+.recap-footer { padding: 14px 16px calc(16px + var(--safe-bottom)); position: relative; z-index: 5; }
+.recap-download-btn {
+  background: rgba(255,255,255,0.18);
+  color: #fff;
+  border: 1.5px solid rgba(255,255,255,0.5);
+}
+.recap-download-btn:disabled { opacity: 0.7; }
+@keyframes recapFadeIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+
 /* ROAD TO... */
 .roadmap-mini-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .badge.badge-green { background: #d3f2da; color: var(--green); }
 .journal-entry-card { margin-bottom: 8px; }
+
+/* ÎLES D'AVENTURE */
+.island-chip-row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+.island-chip {
+  position: relative;
+  flex: 0 0 auto;
+  width: 92px;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 8px;
+  text-align: center;
+  cursor: pointer;
+}
+.island-chip.active { border-color: var(--orange); background: var(--orange-light); }
+.island-chip.locked { opacity: 0.65; }
+.island-chip-pin { position: absolute; top: -6px; right: -6px; font-size: 15px; }
+.active-island-banner { margin-top: 10px; text-align: center; }
+.island-chip-icon { font-size: 26px; }
+.island-chip-name { font-size: 11px; font-weight: 700; margin-top: 4px; line-height: 1.2; }
+.island-chip-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+.island-svg-wrap { border-radius: 12px; overflow: hidden; background: linear-gradient(180deg, #eaf6ff, #ffffff); }
+.island-svg { width: 100%; height: auto; display: block; }
+
+.island-objects-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.island-object { text-align: center; background: var(--card); border-radius: 10px; padding: 8px 4px; border: 1px solid var(--border); }
+.island-object.unlocked { border-color: var(--orange); background: var(--orange-light); }
+.island-object .ic { font-size: 20px; }
+.island-object .lbl { font-size: 9px; margin-top: 3px; color: var(--text-muted); font-weight: 600; line-height: 1.1; }
+
+.quest-card { margin-bottom: 8px; }
+.quest-card.done { opacity: 0.85; }
 
 /* Badge unlock popup */
 .badge-unlock-item {
